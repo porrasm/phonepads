@@ -12,6 +12,7 @@ public static class Presets
     public static IReadOnlyList<MappedSchema> All { get; } =
     [
         GenericGamepad(),
+        GameCube(),
         TwinStick(),
         Racing(),
         Platformer(),
@@ -54,6 +55,54 @@ public static class Presets
             ["y"] = PadTarget.Y,
             ["lb"] = PadTarget.LeftBumper,
             ["rb"] = PadTarget.RightBumper,
+        }));
+    }
+
+    /// <summary>
+    /// A GameCube pad with one stick instead of two, for Dolphin and friends. The targets follow
+    /// Dolphin's standard Xbox profile: control stick on the left thumbstick, the analog L and R
+    /// shoulders on the triggers, and Z on the right bumper.
+    ///
+    /// The C-stick is deliberately absent. Two full sticks plus a face diamond leaves a phone
+    /// screen with nothing worth touching, and most GameCube and Wii games are playable without it.
+    /// </summary>
+    private static MappedSchema GameCube()
+    {
+        var schema = new Schema
+        {
+            Id = "gamecube",
+            Name = "GameCube (single stick)",
+            Orientation = SchemaOrientation.Landscape,
+            IsPreset = true,
+            Controls =
+            [
+                Stick("stick", ControlZone.Left, ControlSize.Large),
+                // Four buttons in the right zone become the face diamond, as on the real pad.
+                Button("a", "A", ControlZone.Right, ControlSize.Large),
+                Button("b", "B", ControlZone.Right),
+                Button("x", "X", ControlZone.Right),
+                Button("y", "Y", ControlZone.Right),
+                Button("r", "R", ControlZone.ShoulderRight, ControlSize.Large),
+                Button("l", "L", ControlZone.ShoulderLeft, ControlSize.Large),
+                Button("z", "Z", ControlZone.ShoulderRight),
+                // Rarely reached mid-game, so both sit in the small top-centre row.
+                Button("start", "Start", ControlZone.Aux, ControlSize.Small),
+                Dpad("dpad", ControlZone.Aux, ControlSize.Small),
+            ],
+        };
+
+        return new MappedSchema(schema, Map("gamecube", new()
+        {
+            ["stick"] = PadTarget.LeftStick,
+            ["a"] = PadTarget.A,
+            ["b"] = PadTarget.B,
+            ["x"] = PadTarget.X,
+            ["y"] = PadTarget.Y,
+            ["l"] = PadTarget.LeftTrigger,
+            ["r"] = PadTarget.RightTrigger,
+            ["z"] = PadTarget.RightBumper,
+            ["start"] = PadTarget.Start,
+            ["dpad"] = PadTarget.Dpad,
         }));
     }
 
@@ -198,13 +247,16 @@ public static class Presets
         Size = size,
     };
 
-    private static SchemaControl Dpad(string id) => new()
+    private static SchemaControl Dpad(
+        string id,
+        ControlZone zone = ControlZone.Left,
+        ControlSize size = ControlSize.Large) => new()
     {
         Id = id,
         Type = ControlType.Joystick,
         Mode = ControlMode.Dpad,
-        Zone = ControlZone.Left,
-        Size = ControlSize.Large,
+        Zone = zone,
+        Size = size,
     };
 
     private static SchemaControl Button(

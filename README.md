@@ -23,7 +23,8 @@ Working:
 - Join code and scannable QR code
 - Lobby with live player list, colours, ready state and pad assignment
 - Start / pause / resume / end, with pads released to neutral on pause and removed on end
-- Six bundled preset layouts, each with a default mapping
+- Seven bundled preset layouts, each with a default mapping, including a single-stick GameCube
+  layout aimed at Dolphin
 - Input mapping to virtual Xbox 360 pads, including the y-axis flip between phone and pad
 - Live per-player pad readout, so a mapping can be checked without a game running
 - Automatic reconnection with backoff; terminal close codes are reported instead of retried

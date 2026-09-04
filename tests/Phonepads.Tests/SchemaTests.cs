@@ -181,6 +181,34 @@ public class PresetTests
     }
 
     [Fact]
+    public void The_gamecube_layout_really_only_has_one_stick()
+    {
+        var gamecube = Presets.ById("gamecube");
+        Assert.NotNull(gamecube);
+
+        var sticks = gamecube.Schema.Controls
+            .Where(c => c.Type == ControlType.Joystick && c.Mode != ControlMode.Dpad)
+            .ToList();
+
+        Assert.Single(sticks);
+        Assert.Equal(PadTarget.LeftStick, gamecube.Mapping.For(sticks[0].Id)?.Target);
+    }
+
+    [Fact]
+    public void The_gamecube_layout_follows_dolphins_standard_xbox_profile()
+    {
+        var gamecube = Presets.ById("gamecube");
+        Assert.NotNull(gamecube);
+
+        // L and R are analog shoulders on the real pad, and Z sits above R.
+        Assert.Equal(PadTarget.LeftTrigger, gamecube.Mapping.For("l")?.Target);
+        Assert.Equal(PadTarget.RightTrigger, gamecube.Mapping.For("r")?.Target);
+        Assert.Equal(PadTarget.RightBumper, gamecube.Mapping.For("z")?.Target);
+        Assert.Equal(PadTarget.Start, gamecube.Mapping.For("start")?.Target);
+        Assert.Equal(PadTarget.Dpad, gamecube.Mapping.For("dpad")?.Target);
+    }
+
+    [Fact]
     public void Presets_are_marked_read_only()
     {
         Assert.All(Presets.All, p => Assert.True(p.Schema.IsPreset));
