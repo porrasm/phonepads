@@ -1,0 +1,38 @@
+┌─────────────────────────────────────────┐
+│                 UI                      │
+│                                         │
+│ C# + .NET 10                            │
+│ WinUI 3                                  │
+│ XAML                                     │
+│ MVVM                                     │
+└───────────────────┬─────────────────────┘
+                    │
+┌───────────────────▼─────────────────────┐
+│              Application                 │
+│                                         │
+│ Gamepad.Core                             │
+│ C#                                      │
+│                                         │
+│ Mapping engine                           │
+│ Profile system                           │
+│ Session management                       │
+│ Controller state                         │
+└───────────────────┬─────────────────────┘
+                    │
+          ┌─────────┴─────────┐
+          ▼                   ▼
+┌──────────────────┐ ┌────────────────────┐
+│ Gamepad.Protocol │ │ VirtualController  │
+│                  │ │                    │
+│ HttpClient       │ │ Interface          │
+│ WebSocket        │ │                    │
+│ System.Text.Json │ │ Windows backend    │
+└──────────────────┘ └─────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │ Native Windows      │
+                    │ virtual HID layer   │
+                    │                     │
+                    │ C/C++ + KMDF/VHF    │
+                    └─────────────────────┘
