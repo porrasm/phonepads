@@ -1,0 +1,29 @@
+## Build output
+bin/
+obj/
+publish/
+artifacts/
+
+## Rider / Visual Studio / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+
+## Test and coverage output
+TestResults/
+*.coverage
+*.trx
+coverage*.json
+coverage*.xml
+
+## Portable app data written beside the executable at runtime
+phonepads.settings.json
+
+## OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
