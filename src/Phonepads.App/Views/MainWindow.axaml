@@ -1,0 +1,184 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Phonepads.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
+        x:Class="Phonepads.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="900" Height="720"
+        MinWidth="640" MinHeight="520"
+        Title="Phonepads">
+
+    <Window.Styles>
+        <Style Selector="TextBlock.h1">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="TextBlock.h2">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,12,0,4" />
+        </Style>
+        <Style Selector="TextBlock.dim">
+            <Setter Property="Opacity" Value="0.65" />
+        </Style>
+        <Style Selector="Border.card">
+            <Setter Property="BorderBrush" Value="#33888888" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="18">
+
+        <!-- Driver prerequisite (SETUP-2) -->
+        <Border DockPanel.Dock="Top"
+                Background="#33CC7722" CornerRadius="6" Padding="12" Margin="0,0,0,12"
+                IsVisible="{Binding !DriverAvailable}">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Controller driver missing" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding DriverMessage}" TextWrapping="Wrap" />
+                <Button Content="Open the download page"
+                        Command="{Binding OpenDriverDownloadCommand}"
+                        HorizontalAlignment="Left" />
+            </StackPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Classes="dim" TextWrapping="Wrap" />
+                <TextBlock Grid.Column="1" Text="{Binding ConnectionText}" Classes="dim" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer>
+            <Grid>
+
+                <!-- ============ SETUP ============ -->
+                <StackPanel IsVisible="{Binding IsSetupVisible}" Spacing="0">
+
+                    <TextBlock Text="Phonepads" Classes="h1" />
+                    <TextBlock Classes="dim" TextWrapping="Wrap" Margin="0,4,0,14"
+                               Text="Turn phones into Xbox controllers. Create a session on the website, then paste its setup code here." />
+
+                    <Border Classes="card">
+                        <StackPanel>
+                            <TextBlock Text="1. Choose the layouts players can pick from" Classes="h2" Margin="0,0,0,6" />
+                            <ItemsControl ItemsSource="{Binding SchemaOptions}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SchemaOptionViewModel">
+                                        <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Summary}" Classes="dim" FontSize="12" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="{Binding SelectionSummary}" Classes="dim" Margin="0,8,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="card">
+                        <StackPanel>
+                            <TextBlock Text="2. Describe the game" Classes="h2" Margin="0,0,0,6" />
+                            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" RowDefinitions="Auto">
+                                <TextBlock Grid.Column="0" Text="Game" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBox Grid.Column="1" Text="{Binding GameName}" Watermark="Shown to players" />
+                                <TextBlock Grid.Column="2" Text="Min" VerticalAlignment="Center" Margin="12,0,6,0" />
+                                <NumericUpDown Grid.Column="3" Value="{Binding MinPlayers}" Minimum="1" Maximum="12" Width="90" />
+                                <TextBlock Grid.Column="4" Text="Max" VerticalAlignment="Center" Margin="12,0,6,0" />
+                                <NumericUpDown Grid.Column="5" Value="{Binding MaxPlayers}" Minimum="1" Maximum="12" Width="90" />
+                            </Grid>
+                            <CheckBox Content="Forward game rumble to phones" IsChecked="{Binding RumbleEnabled}" Margin="0,10,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="card">
+                        <StackPanel>
+                            <TextBlock Text="3. Paste the setup code" Classes="h2" Margin="0,0,0,6" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBox Text="{Binding SetupCode}" Watermark="ABC234" Width="160"
+                                         FontSize="18" FontFamily="Consolas,monospace" MaxLength="6" />
+                                <Button Content="Claim session"
+                                        Command="{Binding ClaimCommand}"
+                                        IsEnabled="{Binding !IsBusy}"
+                                        Classes="accent" />
+                                <Button Content="Create one on the website"
+                                        Command="{Binding OpenCreatePageCommand}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding ErrorMessage}" Foreground="#E05555" TextWrapping="Wrap"
+                                       Margin="0,10,0,0" IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Expander Header="Advanced" Margin="0,4,0,0">
+                        <StackPanel Spacing="6" Margin="0,8,0,0">
+                            <TextBlock Text="Gamepad service address" Classes="dim" />
+                            <TextBox Text="{Binding BaseUrl}" />
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+
+                <!-- ============ SESSION ============ -->
+                <StackPanel IsVisible="{Binding IsSessionVisible}" Spacing="0">
+
+                    <Border Classes="card">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <Image Grid.Column="0" Source="{Binding JoinQr}" Width="180" Height="180"
+                                   RenderOptions.BitmapInterpolationMode="None" />
+                            <StackPanel Grid.Column="1" Margin="18,0,0,0" VerticalAlignment="Center" Spacing="6">
+                                <TextBlock Text="Join code" Classes="dim" />
+                                <TextBlock Text="{Binding JoinCode}" FontSize="44" FontWeight="Bold"
+                                           FontFamily="Consolas,monospace" />
+                                <Button Content="{Binding JoinUrl}" Command="{Binding OpenJoinUrlCommand}"
+                                        HorizontalAlignment="Left" />
+                                <TextBlock Text="{Binding ReadySummary}" Classes="dim" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Classes="card">
+                        <StackPanel>
+                            <TextBlock Text="Players" Classes="h2" Margin="0,0,0,8" />
+                            <ItemsControl ItemsSource="{Binding Players}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:PlayerRowViewModel">
+                                        <Border BorderBrush="#22888888" BorderThickness="0,0,0,1" Padding="0,8">
+                                            <Grid ColumnDefinitions="Auto,160,90,110,*">
+                                                <Border Grid.Column="0" Width="14" Height="14" CornerRadius="7"
+                                                        Background="{Binding Swatch}" VerticalAlignment="Center"
+                                                        Margin="0,0,10,0" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding SlotLabel}" Classes="dim" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="3" Text="{Binding StatusLine}" Classes="dim" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="4" Text="{Binding PadState}" Classes="dim"
+                                                           FontFamily="Consolas,monospace" FontSize="11" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Classes="dim" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
+                                       Text="Windows accepts at most four controllers. Players beyond the fourth stay in the lobby without a pad." />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Start game" Command="{Binding StartCommand}"
+                                IsEnabled="{Binding CanStart}" Classes="accent" />
+                        <Button Content="Pause" Command="{Binding PauseCommand}" IsEnabled="{Binding CanPause}" />
+                        <Button Content="Resume" Command="{Binding ResumeCommand}" IsEnabled="{Binding CanResume}" />
+                        <Button Content="End session" Command="{Binding EndCommand}" />
+                    </StackPanel>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
