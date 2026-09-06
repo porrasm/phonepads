@@ -19,8 +19,9 @@ Players — anyone with the join code. No account needed.
 Playing (with your phone)
 Open this page on your phone and enter the join code shown by the game or the host — or scan the QR code / open the join link if one is shared. No account or install is needed.
 In the lobby, pick your name and color (both must be unique in the session) and, if the game offers several control layouts, choose one. Tap Ready when you are set.
-When the game starts, your phone becomes the controller. Some layouts need landscape — rotate your phone if prompted.
+When the game starts, your phone becomes the controller. Layouts that need two thumbs come up sideways on their own — just turn the phone to match; it never re-arranges mid-game, even if your phone rotates the screen while you tilt. Tap ⟳ Rotate at the top edge to turn the layout the other way. Tip: lock rotation in your phone's settings while you play (on iPhone the lock is portrait-only, and that is fine).
 Closed the tab or lost connection? Just reopen the page — your spot is remembered on this device and you rejoin instantly. Use Leave if you want to give up your spot for good.
+If the game itself drops out and stays away for a few minutes, the session closes and you are back on the start page. The host (or the game) hands out a new join code; a game that remembers its players lets you simply tap your own name to rejoin.
 Try it — an example controller
 This is the real thing, not a mockup: the same layout engine, control components and input pipeline the phone controller uses, rendered from an example schema with one control of every kind — a full joystick (drive), an x-axis slider (aim), a dpad (hat), a button (fire) and a tilt sensor (lean — the chip at the top edge; it streams only on a device with motion sensors). Drag and tap: below the controller is exactly the input message a driver would receive.
 
@@ -36,7 +37,7 @@ Log in and press "Create session" on the app's front page. You can optionally at
 You get a setup code. Enter it in the game you want to play (where the game asks for it — for a game using this system there is typically a "connect controllers" screen).
 Once the game claims the session, a join code appears. Share it (or the copy-link) with the players. Hosting does not make you a player — if you want to play too, join with the join code like anyone else.
 The game starts the match when everyone is ready — the host screen is a lobby, not a remote control. Your escape hatch is the "End session" button, which ends the session for everyone.
-One session per account at a time. Sessions idle for 24 hours (or never claimed within 30 minutes) are cleaned up automatically.
+One session per account at a time. A session whose game stays disconnected for 3 minutes is closed for everyone — sessions are not kept alive for a missing game; the game recreates one instead (see the roster feature in the developer guide). Sessions idle for 24 hours (or never claimed within 30 minutes) are cleaned up too.
 
 Developer guide: connect your game
 Everything a driver needs is plain HTTP + WebSocket JSON on the same host as this page — no SDK or special client required. The flow:
@@ -48,7 +49,7 @@ Everything a driver needs is plain HTTP + WebSocket JSON on the same host as thi
 4. Connect the WebSocket (wsPath) → watch players get ready
 5. Send {"type":"start"} → receive input frames → play!
 1. Claim the session (HTTP setup)
-POST https://gamepad.porras.club/api/gamepad/driver/setup — JSON body, no auth (the setup code is the credential), rate limited to 10 requests/min per IP. The setup code is single-use: it is consumed by this call and exchanged for a long-lived driver token.
+POST https://localhost:3000/api/gamepad/driver/setup — JSON body, no auth (the setup code is the credential), rate limited to 10 requests/min per IP. The setup code is single-use: it is consumed by this call and exchanged for a long-lived driver token.
 
 {
   "setupCode": "ABC234",
@@ -68,20 +69,26 @@ POST https://gamepad.porras.club/api/gamepad/driver/setup — JSON body, no auth
             "zone": "left", "size": "large" },   // optional layout hints
           { "type": "joystick", "id": "aim",  "mode": "x" },  // "x"|"y"|"dpad"
           { "type": "button",   "id": "fire", "label": "Fire" },
-          { "type": "gyro",     "id": "lean", "range": 45 }   // tilt sensor;
+          { "type": "gyro",     "id": "lean", "range": 45 },  // tilt sensor;
                                    // mode "full"|"x"|"y", range in degrees
+          { "type": "motion",   "id": "imu" }                 // raw IMU stream
+                                   // (emulators; see "Raw motion" below)
         ]
       }
     ],
-    "colors": ["#FF6B6B", "..."]   // optional #RRGGBB palette; unique,
+    "colors": ["#FF6B6B", "..."],  // optional #RRGGBB palette; unique,
                                    // length >= maxPlayers (default: 12 colors)
+    "roster": [                    // optional: predefined players (see
+      { "name": "Player 1", "color": "#FF6B6B" },   // "Recreating a lost
+      { "name": "Player 2", "color": "#6BCB77" }    //  session" below)
+    ]
   }
 }
 The phone lays controls out itself — you describe what controls exist (array order = importance), never where they go. The optional layout hints state intent without pixel control, and unhinted controls fall back to the order-based heuristics:
 
 zone per control: "left" / "right" claim that thumb (a joystick corner, or a button diamond of up to four — more spill to that side's shoulder row), "shoulder-left" / "shoulder-right" are pills along the top edge, "aux" is a small top-center row for rarely-used controls (pause, menu).
 size per control: "small" / "medium" / "large" — visual weight relative to the zone's default, never pixels.
-orientation per schema: "landscape" always demands landscape, "portrait" declares a one-handed portrait controller, "auto" (default) lets the control count decide. The player is prompted to rotate when holding the phone the wrong way.
+orientation per schema: "landscape" always demands landscape, "portrait" declares a one-handed portrait controller, "auto" (default) lets the control count decide. The phone owns the orientation: it renders the controller the demanded way whatever the device's own rotation does (rotating the content itself when the OS will not), and never re-lays it out mid-game. Players can lock rotation on their phone and still play landscape.
 Success response:
 
 {
@@ -113,11 +120,30 @@ A payload of { "vibrateMs": n } makes the player's phone vibrate; any other payl
 not_initialized ──driver setup──▶ waiting_for_players ──start──▶ in_progress
                                                                  │        ▲
                                                   pause /        ▼        │ resume
-                                                  driver lost   paused ───┘
-any active state ──end / host end / 24h inactivity──▶ ended (terminal)
+                                                  driver drop   paused ───┘
+any active state ──end / host end / driver away 3 min / 24h idle──▶ ended
 Only the driver starts, pauses, resumes and ends the game. Players can join only in waiting_for_players; profile and ready changes are lobby-only (schema switching also works while paused).
 "Everyone ready" is information, not a trigger — you decide when to send start (e.g. after your level finished loading). You'll see it via player_updated events.
 If your connection drops during in_progress, the session auto-pauses (state_changed with reason driver_disconnected). Reconnect with your driver token and send resume explicitly.
+The session does not wait for you. Without a driver socket for 3 minutes — after setup, or after a drop — the session is treated as lost and ends for everyone (state_changed to ended with reason driver_lost; the players are sent back to the start page, the host's session info disappears). Your driver token is then dead: set up a new session — quickly, with a roster (next section).
+Recreating a lost session (roster)
+Losing a session should cost seconds, not a lobby round: remember the players from your snapshot (names and colors), get a fresh setup code from the host and set up again with a roster:
+
+{
+  "setupCode": "NEW234",
+  "config": {
+    "game": "Tank Game",
+    "schemas": [ ...same as before... ],
+    "roster": [
+      { "name": "Player 1", "color": "#FF6B6B" },
+      { "name": "Player 2", "color": "#6BCB77" },
+      { "name": "Player 3", "color": "#FFD93D" }
+    ]
+  }
+}
+Players joining a roster session do not type names: the join screen lists the roster and each player taps the one that is theirs. A taken slot cannot be picked twice; name and color are locked in the lobby (update_profile is rejected with profile_locked).
+minPlayers and maxPlayers are the roster size (omit them, or set both to it). start is allowed only once every slot is filled, connected and ready — so "everyone is back" is exactly the moment you can resume the match.
+Roster names must be unique (case-insensitively) and colors unique and from the palette (colors, or the default one). Players get new player ids in the new session — map them back by name.
 Server events to handle: snapshot, state_changed {state, reason}, player_joined/updated/connected/disconnected, player_left (permanent — remove the player; player_disconnected is just a reconnectable drop), error {code, message}, and input (below).
 
 4. Receiving input
@@ -144,6 +170,23 @@ A { "type": "gyro" } control streams the phone's tilt as a virtual joystick: the
 
 Gyro takes no space in the controller layout — only a small chip on the top edge that shows tilt is live and re-centers the neutral pose on tap. The phone auto-calibrates neutral to however the player holds it when the controller appears.
 Motion sensors are permission-gated on iOS and missing on desktops, so schemas containing a gyro control are not selectable on devices without a working sensor. Always offer at least one gyro-free schema as a fallback.
+Tilt axes are relative to the controller's orientation, which the phone freezes for the game — a tilt that makes the OS rotate the screen never turns steering into throttle.
+Raw motion (emulators)
+A { "type": "motion" } control streams the phone's inertial sensors uncalibrated, for drivers that do their own motion processing — above all emulators: Dolphin reconstructs a Wii Remote's accelerometer and MotionPlus from exactly this feed (via a DSU / cemuhook bridge), including shakes, swings and gyro pointing, none of which a tilt joystick can carry. The samples arrive in their own message, outside the coalesced input frames, at the sensor rate (~60 Hz on phones), a few per message:
+
+{
+  "type": "motion",
+  "playerId": "…",
+  "samples": [                     // oldest first, 1–16 per message
+    [1832.4, 0.02, -0.01, 0.99, 12.5, -3.0, 0.4],
+    [1849.1, 0.03,  0.00, 0.98, 10.1, -2.8, 0.6]
+  ]                                // [t, ax, ay, az, gx, gy, gz]
+}
+t: the phone's monotonic sample time in ms (arbitrary origin — use differences; it is what lets you integrate rates correctly when messages arrive in bursts).
+ax, ay, az: acceleration including gravity, in g, as the reaction force: a phone lying flat and still reads [0, 0, +1]. The phone normalizes browser sign quirks, so every platform reports this way.
+gx, gy, gz: angular rate about the same axes in degrees/second, right-hand rule.
+Axes are the device frame, never the screen's: x points to the right of the screen in portrait, y toward the top edge, z out of the screen toward the player. Declare the hold in your game: the Wii Remote hold is portrait, top edge toward the TV, screen up, so the remote's forward is +y, up is +z, right is +x.
+A stream, not state: there is no seq, nothing is deduplicated, every sample counts. Relayed only while in_progress, like input, and gated like gyro (one per schema; not selectable without a working sensor — keep a fallback schema). Tilt and motion may share a schema.
 5. Reconnection and close codes
 Store the driver token and reconnect with it after any drop — you get a fresh snapshot. Do not reconnect on these close codes:
 
@@ -151,7 +194,7 @@ Store the driver token and reconnect with it after any drop — you get a fresh 
 4010 replaced — a newer connection for the same identity took over (also how a player moving to a second device behaves).
 Anything else is transient: retry with backoff.
 Minimal driver (Node.js / browser)
-const BASE = "https://gamepad.porras.club";
+const BASE = "https://localhost:3000";
 
 const res = await fetch(BASE + "/api/gamepad/driver/setup", {
   method: "POST",
