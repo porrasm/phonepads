@@ -16,14 +16,22 @@ public readonly record struct DsuMotion(
 ///
 /// The phone reports in its device frame: +x to the right of the screen, +y toward the top
 /// edge, +z out of the screen. Held like a Wii Remote — upright, top edge toward the TV,
-/// screen up — that makes +x right, +y forward and +z up. Dolphin's DSU client defines its
-/// inputs with fixed signs (<c>Accel Up = −accel_y</c>, <c>Accel Left = +accel_x</c>,
-/// <c>Accel Forward = +accel_z</c>, <c>Pitch Up = +pitch</c>, <c>Roll Right = +roll</c>,
-/// <c>Yaw Right = +yaw</c>), so each field below is whichever phone axis produces the right
-/// physical meaning under those signs. Worked through with the right-hand rule:
-/// rotating about the right axis lifts the nose (pitch up), rotating about the forward axis
-/// tips the top to the right (roll right), and rotating about the up axis turns the nose
-/// <i>left</i>, hence the negated yaw.
+/// screen up — that makes +x right, +y forward and +z up. Each gyro field is the phone axis
+/// that rotates the remote about the matching sensor axis: pitch about the right axis (+x),
+/// roll about the forward axis (+y), yaw about the up axis (+z).
+///
+/// The signs are the DualShock 4's, which cemuhook inherits — and the DS4 does <i>not</i>
+/// follow the naive right-hand rule on every axis, so they are settled by testing against
+/// Dolphin's live Motion Input bars, not by derivation:
+/// <list type="bullet">
+///   <item>Pitch is inverted from the right-hand rule: nose-up is −pitch on a DS4, so we send
+///     <c>−gx</c>. (Sending <c>+gx</c> pointed the cursor up when you aimed down.)</item>
+///   <item>Yaw is negated: a right-hand turn about the up axis swings the nose left, and
+///     Dolphin's <c>Yaw Right</c> wants right-positive.</item>
+///   <item>Roll is passed straight through; tipping the top edge right reads as roll-right.</item>
+/// </list>
+/// Accelerometer signs match Dolphin's DSU inputs (<c>Accel Up = −accel_y</c>,
+/// <c>Accel Left = +accel_x</c>, <c>Accel Forward = +accel_z</c>).
 /// </summary>
 public static class WiiMotionFrame
 {
@@ -31,7 +39,7 @@ public static class WiiMotionFrame
         AccelX: (float)-phone.AccelX,
         AccelY: (float)-phone.AccelZ,
         AccelZ: (float)phone.AccelY,
-        GyroPitch: (float)phone.RateX,
+        GyroPitch: (float)-phone.RateX,
         GyroYaw: (float)-phone.RateZ,
         GyroRoll: (float)phone.RateY);
 }

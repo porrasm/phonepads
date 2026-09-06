@@ -516,11 +516,12 @@ public class DsuPadHubTests
         var pad = rig.Hub.Create(0);
 
         // Nose lifting at 90 °/s about the phone's x axis for 100 ms, then one 100 ms tick.
+        // Pitch is negated on the way to Dolphin's frame (see WiiMotionFrame).
         pad.PushMotion([new MotionSample(0, 0, 0, 1, 90, 0, 0), new MotionSample(100, 0, 0, 1, 90, 0, 0)]);
         rig.Hub.Tick(TimeSpan.FromMilliseconds(100));
 
         var p = Assert.Single(rig.Sent).Data.AsSpan(20).ToArray();
-        Assert.Equal(90f, BinaryPrimitives.ReadSingleLittleEndian(p.AsSpan(68)), 3); // pitch
+        Assert.Equal(-90f, BinaryPrimitives.ReadSingleLittleEndian(p.AsSpan(68)), 3); // pitch
     }
 
     [Fact]
@@ -585,11 +586,14 @@ public class WiiMotionFrameTests
     }
 
     [Fact]
-    public void Lifting_the_nose_is_pitch_up()
+    public void Pitch_is_inverted_from_the_phones_x_rate_to_match_the_ds4_convention()
     {
+        // Nose-up is +gx by the right-hand rule, but the DS4 (and so cemuhook) reports pitch
+        // with the opposite sign — confirmed by Dolphin pointing the cursor the wrong way until
+        // this was negated. Getting this backwards inverts up/down when pointing.
         var dsu = WiiMotionFrame.FromPhone(new MotionOutput(0, 0, 1, RateX: 45, RateY: 0, RateZ: 0));
 
-        Assert.Equal(45f, dsu.GyroPitch);
+        Assert.Equal(-45f, dsu.GyroPitch);
     }
 
     [Fact]
