@@ -85,9 +85,11 @@ One-time Dolphin setup:
 1. **Controllers → Alternate Input Sources**: enable the DSU client, add `127.0.0.1:26760`, and give it
    the description `Phonepads`. That name becomes part of every device name (`DSUClient/0/Phonepads`
    is player 1, `/1/` is player 2, and so on).
-2. In Phonepads, open **Wii Remote mode** and press **Write Dolphin profiles**. They land in
-   `dolphin/Wiimote/` beside the executable and, if Dolphin's user folder is in the usual place,
-   straight into its `Config/Profiles/Wiimote/` as well.
+2. In Phonepads, open **Wii Remote mode** and press **Install Dolphin profiles…**. It asks for your
+   Dolphin folder: for a normal install that is the `Dolphin Emulator` folder in your Documents; for
+   a portable install (one with a `portable.txt`) it is the folder containing `Dolphin.exe`. Phonepads
+   works out the profile folder from there and tells you where it wrote — it never guesses, and a
+   folder that cannot hold profiles is refused with directions.
 3. For each Wii Remote in Dolphin: set it to **Emulated Wii Remote**, open Configure, and load the
    matching profile — *Phonepads Wii Remote (P1)* for player 1, and so on. There are three variants:
    plain remote, remote with Nunchuk, and sideways.

@@ -140,22 +140,74 @@ public static class DolphinProfile
         return written;
     }
 
-    /// <summary>
-    /// Dolphin's Wii Remote profile folders in the places a Windows install keeps its user
-    /// data. Only existing folders are returned; nothing is created.
-    /// </summary>
-    public static IReadOnlyList<string> FindDolphinProfileDirectories()
+    /// <summary>Where profiles should go for a folder the user picked, or why they cannot.</summary>
+    public sealed record ProfileTarget(string? Directory, string Message)
     {
-        var candidates = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "Dolphin Emulator", "Config", "Profiles", "Wiimote"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Dolphin Emulator", "Config", "Profiles", "Wiimote"),
-        };
-
-        return candidates.Where(Directory.Exists).ToList();
+        public bool Ok => Directory is not null;
     }
+
+    /// <summary>
+    /// Works out Dolphin's Wii Remote profile folder from whatever the user pointed at. Dolphin
+    /// keeps profiles under its <i>user</i> folder, which is inside the install only for a
+    /// portable install (one with a <c>portable.txt</c>); otherwise it is
+    /// <c>Documents\Dolphin Emulator</c>. Nothing is assumed: an install folder that is not
+    /// portable is refused with directions rather than guessed around.
+    /// </summary>
+    public static ProfileTarget ResolveProfileDirectory(string chosen)
+    {
+        chosen = Path.GetFullPath(chosen.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var name = Path.GetFileName(chosen);
+        var parent = Path.GetDirectoryName(chosen);
+
+        // Pointed straight at the profile folder, or at Config or Profiles above it.
+        if (name.Equals("Wiimote", StringComparison.OrdinalIgnoreCase)
+            && parent is not null
+            && Path.GetFileName(parent).Equals("Profiles", StringComparison.OrdinalIgnoreCase))
+        {
+            return Ok(chosen, "Dolphin's Wii Remote profile folder.");
+        }
+
+        if (name.Equals("Profiles", StringComparison.OrdinalIgnoreCase)
+            && parent is not null
+            && Path.GetFileName(parent).Equals("Config", StringComparison.OrdinalIgnoreCase))
+        {
+            return Ok(Path.Combine(chosen, "Wiimote"), "Dolphin's profile folder.");
+        }
+
+        if (name.Equals("Config", StringComparison.OrdinalIgnoreCase)
+            && System.IO.Directory.Exists(chosen))
+        {
+            return Ok(Path.Combine(chosen, "Profiles", "Wiimote"), "Dolphin's Config folder.");
+        }
+
+        // A portable install keeps its user data in User\ next to Dolphin.exe.
+        if (File.Exists(Path.Combine(chosen, "portable.txt")) || System.IO.Directory.Exists(Path.Combine(chosen, "User")))
+        {
+            return Ok(Path.Combine(chosen, "User", "Config", "Profiles", "Wiimote"),
+                "A portable Dolphin install; profiles go in its User folder.");
+        }
+
+        // The user folder itself: Documents\Dolphin Emulator, or wherever it was moved.
+        if (System.IO.Directory.Exists(Path.Combine(chosen, "Config")))
+        {
+            return Ok(Path.Combine(chosen, "Config", "Profiles", "Wiimote"), "Dolphin's user folder.");
+        }
+
+        if (File.Exists(Path.Combine(chosen, "Dolphin.exe")))
+        {
+            return new ProfileTarget(null,
+                "That is a Dolphin install folder without a portable.txt, so Dolphin does not keep its "
+                + "profiles there — it keeps them in the \"Dolphin Emulator\" folder in your Documents. "
+                + "Choose that folder instead. (Or put an empty portable.txt next to Dolphin.exe to make "
+                + "the install portable, then choose this folder again.)");
+        }
+
+        return new ProfileTarget(null,
+            "That folder does not look like Dolphin. Choose either the \"Dolphin Emulator\" folder in "
+            + "your Documents (a normal install) or the folder containing Dolphin.exe (a portable install).");
+    }
+
+    private static ProfileTarget Ok(string directory, string what) => new(directory, what);
 
     private static void Bind(StringBuilder ini, string key, PadTarget target) =>
         ini.AppendLine($"{key} = `{DsuInputName(target)}`");

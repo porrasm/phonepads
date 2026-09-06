@@ -30,6 +30,12 @@ public partial class MainViewModel : ViewModelBase
 
     private SessionManager? _session;
 
+    /// <summary>
+    /// Shows a folder picker starting at the given path and returns the choice, or null if the
+    /// user cancelled. Supplied by the view, which owns the window the picker hangs off.
+    /// </summary>
+    public Func<string?, Task<string?>>? PickFolder { get; set; }
+
     public MainViewModel() : this(PortableStorage.Load())
     {
     }
@@ -47,6 +53,7 @@ public partial class MainViewModel : ViewModelBase
     {
         _settings = settings;
         _hubs = hubs;
+        DolphinFolder = settings.DolphinFolder;
 
         GameName = settings.GameName ?? string.Empty;
         BaseUrl = settings.BaseUrl;
@@ -123,11 +130,22 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    /// <summary>The Dolphin folder profiles were last installed into, shown so it can be recognised.</summary>
+    [ObservableProperty]
+    public partial string? DolphinFolder { get; set; }
+
     public string DolphinInstructions =>
-        $"In Dolphin: Controllers → Alternate Input Sources → enable the DSU client and add " +
+        $"1. In Dolphin: Controllers → Alternate Input Sources → enable the DSU client and add " +
         $"{(_hubs[PadBackend.WiiRemote] as DsuPadHub)?.EndPoint ?? "127.0.0.1:" + _settings.DsuPort} " +
-        $"with the description \"{DolphinProfile.ServerDescription}\". Then set each Wii Remote to " +
-        "Emulated and load the matching Phonepads profile — the button below writes them.";
+        $"with the description \"{DolphinProfile.ServerDescription}\".\n" +
+        "2. Install the controller profiles with the button below. It asks for your Dolphin folder: " +
+        "for a normal install that is the \"Dolphin Emulator\" folder in your Documents; for a portable " +
+        "install it is the folder containing Dolphin.exe.\n" +
+        "3. In Dolphin, set each Wii Remote to Emulated Wii Remote, open Configure, and load the " +
+        "Phonepads profile for that player from the Profile dropdown.";
+
+    public string DolphinFolderLine =>
+        DolphinFolder is null ? "No Dolphin folder chosen yet." : "Profiles installed into: " + DolphinFolder;
 
     public string SelectionSummary
     {
@@ -305,31 +323,48 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Writes the Dolphin profiles beside the executable and, when a Dolphin install is found
-    /// in the usual place, straight into its profile folder as well.
+    /// Asks for the Dolphin folder, works out where its profiles live, and writes them there.
+    /// Nothing is guessed: a folder that cannot be a profile home is refused with directions.
     /// </summary>
     [RelayCommand]
-    private void WriteDolphinProfiles()
+    private async Task InstallDolphinProfilesAsync()
     {
+        ErrorMessage = null;
+
+        if (PickFolder is null)
+        {
+            ErrorMessage = "No folder picker is available in this window.";
+            return;
+        }
+
+        var chosen = await PickFolder(DolphinFolder);
+        if (string.IsNullOrWhiteSpace(chosen)) return;
+
+        var target = DolphinProfile.ResolveProfileDirectory(chosen);
+        if (!target.Ok)
+        {
+            ErrorMessage = target.Message;
+            return;
+        }
+
         try
         {
-            var local = Path.Combine(PortableStorage.Root, "dolphin", "Wiimote");
-            DolphinProfile.WriteAll(local);
-            var targets = new List<string> { local };
+            var written = DolphinProfile.WriteAll(target.Directory!);
 
-            foreach (var dolphinDir in DolphinProfile.FindDolphinProfileDirectories())
-            {
-                DolphinProfile.WriteAll(dolphinDir);
-                targets.Add(dolphinDir);
-            }
+            DolphinFolder = target.Directory;
+            _settings.DolphinFolder = chosen;
+            PortableStorage.Save(_settings);
 
-            StatusMessage = "Dolphin profiles written to: " + string.Join("  |  ", targets);
+            StatusMessage = $"{target.Message} {written.Count} profiles installed into {target.Directory}. " +
+                            "In Dolphin, open a Wii Remote's Configure window and pick a Phonepads profile from the Profile dropdown.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             ErrorMessage = "Could not write the Dolphin profiles: " + ex.Message;
         }
     }
+
+    partial void OnDolphinFolderChanged(string? value) => OnPropertyChanged(nameof(DolphinFolderLine));
 
     // ---- Wiring ----
 

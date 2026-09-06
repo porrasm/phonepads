@@ -131,10 +131,12 @@
                         <StackPanel Spacing="8" Margin="0,8,0,0">
                             <TextBlock Text="{Binding WiiMessage}" TextWrapping="Wrap" />
                             <TextBlock Text="{Binding DolphinInstructions}" Classes="dim" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Content="Install Dolphin profiles…" Command="{Binding InstallDolphinProfilesCommand}" />
+                                <TextBlock Text="{Binding DolphinFolderLine}" Classes="dim" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </StackPanel>
                             <TextBlock Classes="dim" TextWrapping="Wrap"
                                        Text="Hold the phone like a remote: upright, top edge toward the TV, screen up. Pointing comes from the gyro and drifts — the Recenter button on the phone resets it." />
-                            <Button Content="Write Dolphin profiles" Command="{Binding WriteDolphinProfilesCommand}"
-                                    HorizontalAlignment="Left" />
                         </StackPanel>
                     </Expander>
 

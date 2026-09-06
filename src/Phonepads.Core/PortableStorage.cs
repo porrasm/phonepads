@@ -14,6 +14,9 @@ public sealed class AppSettings
 
     /// <summary>UDP port of the DSU server that Dolphin connects to for Wii Remote mode.</summary>
     [JsonPropertyName("dsuPort")] public int DsuPort { get; set; } = 26760;
+
+    /// <summary>The Dolphin folder last chosen for installing profiles, so the picker starts there.</summary>
+    [JsonPropertyName("dolphinFolder")] public string? DolphinFolder { get; set; }
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

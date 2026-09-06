@@ -739,6 +739,109 @@ public class DolphinProfileTests
         }
     }
 
+    private static string TempDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "phonepads-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    [Fact]
+    public void A_user_folder_resolves_to_its_profile_folder()
+    {
+        var dir = TempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "Config"));
+
+            var target = DolphinProfile.ResolveProfileDirectory(dir);
+
+            Assert.True(target.Ok, target.Message);
+            Assert.Equal(Path.Combine(dir, "Config", "Profiles", "Wiimote"), target.Directory);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void A_portable_install_resolves_into_its_user_folder()
+    {
+        var dir = TempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Dolphin.exe"), "");
+            File.WriteAllText(Path.Combine(dir, "portable.txt"), "");
+
+            var target = DolphinProfile.ResolveProfileDirectory(dir);
+
+            Assert.True(target.Ok, target.Message);
+            Assert.Equal(Path.Combine(dir, "User", "Config", "Profiles", "Wiimote"), target.Directory);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void A_non_portable_install_folder_is_refused_with_directions()
+    {
+        var dir = TempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Dolphin.exe"), "");
+
+            var target = DolphinProfile.ResolveProfileDirectory(dir);
+
+            Assert.False(target.Ok);
+            Assert.Contains("Documents", target.Message);
+            Assert.Contains("portable.txt", target.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Pointing_at_the_profile_folder_or_its_parents_works_too()
+    {
+        var dir = TempDir();
+        try
+        {
+            var wiimote = Path.Combine(dir, "Config", "Profiles", "Wiimote");
+            Directory.CreateDirectory(wiimote);
+
+            Assert.Equal(wiimote, DolphinProfile.ResolveProfileDirectory(wiimote).Directory);
+            Assert.Equal(wiimote, DolphinProfile.ResolveProfileDirectory(Path.Combine(dir, "Config", "Profiles")).Directory);
+            Assert.Equal(wiimote, DolphinProfile.ResolveProfileDirectory(Path.Combine(dir, "Config")).Directory);
+            Assert.Equal(wiimote, DolphinProfile.ResolveProfileDirectory(dir + Path.DirectorySeparatorChar).Directory);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void An_unrelated_folder_is_refused()
+    {
+        var dir = TempDir();
+        try
+        {
+            var target = DolphinProfile.ResolveProfileDirectory(dir);
+
+            Assert.False(target.Ok);
+            Assert.Contains("does not look like Dolphin", target.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
     [Fact]
     public void Writes_a_file_per_variant_per_slot()
     {
