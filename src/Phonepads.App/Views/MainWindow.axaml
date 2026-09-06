@@ -6,7 +6,7 @@
         mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
         x:Class="Phonepads.App.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Width="900" Height="720"
+        Width="920" Height="760"
         MinWidth="640" MinHeight="520"
         Title="Phonepads">
 
@@ -22,6 +22,11 @@
         </Style>
         <Style Selector="TextBlock.dim">
             <Setter Property="Opacity" Value="0.65" />
+        </Style>
+        <Style Selector="TextBlock.badge">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Opacity" Value="0.75" />
+            <Setter Property="Margin" Value="8,0,0,0" />
         </Style>
         <Style Selector="Border.card">
             <Setter Property="BorderBrush" Value="#33888888" />
@@ -39,8 +44,10 @@
                 Background="#33CC7722" CornerRadius="6" Padding="12" Margin="0,0,0,12"
                 IsVisible="{Binding !DriverAvailable}">
             <StackPanel Spacing="8">
-                <TextBlock Text="Controller driver missing" FontWeight="SemiBold" />
+                <TextBlock Text="Xbox controller driver missing" FontWeight="SemiBold" />
                 <TextBlock Text="{Binding DriverMessage}" TextWrapping="Wrap" />
+                <TextBlock Classes="dim" TextWrapping="Wrap"
+                           Text="Wii Remote layouts still work without it — they go to Dolphin over DSU, not through the driver." />
                 <Button Content="Open the download page"
                         Command="{Binding OpenDriverDownloadCommand}"
                         HorizontalAlignment="Left" />
@@ -63,7 +70,7 @@
 
                     <TextBlock Text="Phonepads" Classes="h1" />
                     <TextBlock Classes="dim" TextWrapping="Wrap" Margin="0,4,0,14"
-                               Text="Turn phones into Xbox controllers. Create a session on the website, then paste its setup code here." />
+                               Text="Turn phones into Xbox controllers or Wii Remotes. Create a session on the website, then paste its setup code here." />
 
                     <Border Classes="card">
                         <StackPanel>
@@ -73,14 +80,17 @@
                                     <DataTemplate x:DataType="vm:SchemaOptionViewModel">
                                         <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
                                             <StackPanel>
-                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding BackendLabel}" Classes="badge" VerticalAlignment="Center" />
+                                                </StackPanel>
                                                 <TextBlock Text="{Binding Summary}" Classes="dim" FontSize="12" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </CheckBox>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="{Binding SelectionSummary}" Classes="dim" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding SelectionSummary}" Classes="dim" Margin="0,8,0,0" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
 
@@ -95,7 +105,7 @@
                                 <TextBlock Grid.Column="4" Text="Max" VerticalAlignment="Center" Margin="12,0,6,0" />
                                 <NumericUpDown Grid.Column="5" Value="{Binding MaxPlayers}" Minimum="1" Maximum="12" Width="90" />
                             </Grid>
-                            <CheckBox Content="Forward game rumble to phones" IsChecked="{Binding RumbleEnabled}" Margin="0,10,0,0" />
+                            <CheckBox Content="Forward game rumble to phones (Xbox controllers only)" IsChecked="{Binding RumbleEnabled}" Margin="0,10,0,0" />
                         </StackPanel>
                     </Border>
 
@@ -116,6 +126,17 @@
                                        Margin="0,10,0,0" IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
                         </StackPanel>
                     </Border>
+
+                    <Expander Header="Wii Remote mode (Dolphin)" Margin="0,4,0,0">
+                        <StackPanel Spacing="8" Margin="0,8,0,0">
+                            <TextBlock Text="{Binding WiiMessage}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DolphinInstructions}" Classes="dim" TextWrapping="Wrap" />
+                            <TextBlock Classes="dim" TextWrapping="Wrap"
+                                       Text="Hold the phone like a remote: upright, top edge toward the TV, screen up. Pointing comes from the gyro and drifts — the Recenter button on the phone resets it." />
+                            <Button Content="Write Dolphin profiles" Command="{Binding WriteDolphinProfilesCommand}"
+                                    HorizontalAlignment="Left" />
+                        </StackPanel>
+                    </Expander>
 
                     <Expander Header="Advanced" Margin="0,4,0,0">
                         <StackPanel Spacing="6" Margin="0,8,0,0">
@@ -150,22 +171,29 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:PlayerRowViewModel">
                                         <Border BorderBrush="#22888888" BorderThickness="0,0,0,1" Padding="0,8">
-                                            <Grid ColumnDefinitions="Auto,160,90,110,*">
+                                            <Grid ColumnDefinitions="Auto,160,70,110,*">
                                                 <Border Grid.Column="0" Width="14" Height="14" CornerRadius="7"
                                                         Background="{Binding Swatch}" VerticalAlignment="Center"
                                                         Margin="0,0,10,0" />
-                                                <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" />
+                                                    <TextBlock Text="{Binding SchemaName}" Classes="dim" FontSize="11" />
+                                                </StackPanel>
                                                 <TextBlock Grid.Column="2" Text="{Binding SlotLabel}" Classes="dim" VerticalAlignment="Center" />
                                                 <TextBlock Grid.Column="3" Text="{Binding StatusLine}" Classes="dim" VerticalAlignment="Center" />
-                                                <TextBlock Grid.Column="4" Text="{Binding PadState}" Classes="dim"
-                                                           FontFamily="Consolas,monospace" FontSize="11" VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding PadState}" Classes="dim"
+                                                               FontFamily="Consolas,monospace" FontSize="11" />
+                                                    <TextBlock Text="{Binding MotionState}" Classes="dim"
+                                                               FontFamily="Consolas,monospace" FontSize="11" />
+                                                </StackPanel>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <TextBlock Classes="dim" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
-                                       Text="Windows accepts at most four controllers. Players beyond the fourth stay in the lobby without a pad." />
+                                       Text="Four pads at most. Xbox pads and Wii Remotes can mix; each player gets whichever their layout drives." />
                         </StackPanel>
                     </Border>
 

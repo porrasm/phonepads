@@ -1,5 +1,31 @@
 namespace Phonepads.Core;
 
+/// <summary>
+/// What a mapping drives. The two are different devices with different reach: an Xbox pad
+/// works in any Windows game; a Wii Remote carries motion but only emulators understand it.
+/// </summary>
+public enum PadBackend
+{
+    /// <summary>A virtual Xbox 360 controller via ViGEmBus. Works with Steam and everything else.</summary>
+    XInput,
+
+    /// <summary>
+    /// A motion controller served over the DSU (cemuhook) protocol, which Dolphin turns into
+    /// an emulated Wii Remote with MotionPlus. Buttons, sticks and inertial data all travel
+    /// this way; nothing outside an emulator can read it.
+    /// </summary>
+    WiiRemote,
+}
+
+public static class PadBackendInfo
+{
+    public static string Label(PadBackend backend) => backend switch
+    {
+        PadBackend.WiiRemote => "Wii Remote",
+        _ => "Xbox controller",
+    };
+}
+
 /// <summary>What a schema control drives on the virtual pad.</summary>
 public enum PadTarget
 {
@@ -27,6 +53,7 @@ public enum PadTarget
     DpadDown,
     DpadLeft,
     DpadRight,
+    Guide,
 }
 
 /// <summary>Per-control feel adjustments (MAP-3).</summary>
@@ -60,6 +87,9 @@ public sealed record Mapping
     public required string SchemaId { get; init; }
     public required IReadOnlyDictionary<string, ControlMapping> Controls { get; init; }
 
+    /// <summary>Which device the mapping produces. Motion only reaches the game on a Wii Remote.</summary>
+    public PadBackend Backend { get; init; } = PadBackend.XInput;
+
     public static Mapping Empty(string schemaId) => new()
     {
         SchemaId = schemaId,
@@ -72,11 +102,12 @@ public sealed record Mapping
     /// <summary>
     /// Targets driven by more than one control, and controls with no assignment. Surfaced
     /// as warnings rather than errors — overlapping targets are legal, just rarely intended.
+    /// Motion controls are never "unmapped": they have no pad target, the backend consumes them.
     /// </summary>
     public (IReadOnlyList<string> UnmappedControls, IReadOnlyList<PadTarget> SharedTargets) Review(Schema schema)
     {
         var unmapped = schema.Controls
-            .Where(c => For(c.Id) is null or { Target: PadTarget.None })
+            .Where(c => !c.IsMotion && For(c.Id) is null or { Target: PadTarget.None })
             .Select(c => c.Id)
             .ToList();
 

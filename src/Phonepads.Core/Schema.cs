@@ -6,7 +6,13 @@ public enum ControlType
 {
     Joystick,
     Button,
+    /// <summary>Tilt as a virtual joystick — the phone does the maths.</summary>
     Gyro,
+    /// <summary>
+    /// The raw inertial sensors, uncalibrated, at sensor rate. For backends that do their
+    /// own motion processing — in practice, emulating a Wii Remote.
+    /// </summary>
+    Motion,
 }
 
 /// <summary>How a joystick or gyro reports its value; drives which targets make sense.</summary>
@@ -62,12 +68,19 @@ public sealed record SchemaControl
     /// <summary>True when the control reports one of the eight screen directions.</summary>
     public bool IsDpad => Type == ControlType.Joystick && Mode == ControlMode.Dpad;
 
+    /// <summary>True for the raw sensor stream, which arrives outside input frames and has no pad target.</summary>
+    public bool IsMotion => Type == ControlType.Motion;
+
+    /// <summary>True when the control needs the phone's motion sensors at all.</summary>
+    public bool NeedsSensors => Type is ControlType.Gyro or ControlType.Motion;
+
     public ControlDto ToDto() => new()
     {
         Type = Type switch
         {
             ControlType.Joystick => "joystick",
             ControlType.Button => "button",
+            ControlType.Motion => "motion",
             _ => "gyro",
         },
         Id = Id,
@@ -77,10 +90,11 @@ public sealed record SchemaControl
             ControlMode.XOnly => "x",
             ControlMode.YOnly => "y",
             ControlMode.Dpad => "dpad",
-            // "full" is the default; sending it for a button would be meaningless.
-            _ => Type == ControlType.Button ? null : "full",
+            // "full" is the default; it means nothing for a button or the sensor stream.
+            _ => Type is ControlType.Button or ControlType.Motion ? null : "full",
         },
-        Zone = Zone switch
+        // Sensors take no space in the layout, so hints would only confuse the phone.
+        Zone = IsMotion ? null : Zone switch
         {
             ControlZone.Left => "left",
             ControlZone.Right => "right",
@@ -89,7 +103,7 @@ public sealed record SchemaControl
             ControlZone.Aux => "aux",
             _ => null,
         },
-        Size = Size switch
+        Size = IsMotion ? null : Size switch
         {
             ControlSize.Small => "small",
             ControlSize.Medium => "medium",
@@ -115,7 +129,10 @@ public sealed record Schema
     public bool IsPreset { get; init; }
 
     /// <summary>True when any control needs motion sensors, which not every phone has.</summary>
-    public bool RequiresGyro => Controls.Any(c => c.Type == ControlType.Gyro);
+    public bool RequiresGyro => Controls.Any(c => c.NeedsSensors);
+
+    /// <summary>True when the schema streams raw inertial samples.</summary>
+    public bool HasMotion => Controls.Any(c => c.IsMotion);
 
     public SchemaDto ToDto() => new()
     {
@@ -153,6 +170,12 @@ public sealed record Schema
 
         if (!IsKebabCase(Id))
             problems.Add($"Schema id '{Id}' must be kebab-case.");
+
+        // The service allows one of each sensor control per schema.
+        if (Controls.Count(c => c.Type == ControlType.Gyro) > 1)
+            problems.Add($"'{Name}' has more than one tilt control; the service allows one.");
+        if (Controls.Count(c => c.IsMotion) > 1)
+            problems.Add($"'{Name}' has more than one motion control; the service allows one.");
 
         return problems;
     }

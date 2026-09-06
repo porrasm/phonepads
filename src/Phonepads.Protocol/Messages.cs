@@ -70,6 +70,7 @@ public sealed class ServerMessage
     [JsonPropertyName("snapshot")] public JsonElement Snapshot { get; init; }
     [JsonPropertyName("player")] public JsonElement Player { get; init; }
     [JsonPropertyName("controls")] public JsonElement Controls { get; init; }
+    [JsonPropertyName("samples")] public JsonElement Samples { get; init; }
 
     /// <summary>Control values of an input frame, decoded from their three JSON shapes.</summary>
     public Dictionary<string, ControlValue> ReadControls()
@@ -79,6 +80,58 @@ public sealed class ServerMessage
         foreach (var property in Controls.EnumerateObject())
             result[property.Name] = ControlValue.FromJson(property.Value);
         return result;
+    }
+
+    /// <summary>
+    /// Samples of a "motion" message, oldest first. Rows that are not seven numbers are
+    /// skipped rather than failing the whole message.
+    /// </summary>
+    public List<MotionSample> ReadMotionSamples()
+    {
+        var result = new List<MotionSample>();
+        if (Samples.ValueKind != JsonValueKind.Array) return result;
+
+        foreach (var row in Samples.EnumerateArray())
+        {
+            if (MotionSample.TryFromJson(row, out var sample)) result.Add(sample);
+        }
+
+        return result;
+    }
+}
+
+/// <summary>
+/// One raw inertial sample from the phone: <c>[t, ax, ay, az, gx, gy, gz]</c> on the wire.
+/// Axes are the device frame — x to the right of the screen in portrait, y toward the top
+/// edge, z out of the screen toward the player — never the screen's.
+/// </summary>
+public readonly record struct MotionSample(
+    /// <summary>The phone's monotonic sample time in milliseconds. Arbitrary origin; use differences.</summary>
+    double Time,
+    /// <summary>Acceleration including gravity, in g, as the reaction force: flat and still reads (0, 0, +1).</summary>
+    double AccelX,
+    double AccelY,
+    double AccelZ,
+    /// <summary>Angular rate about the same axes in degrees per second, right-hand rule.</summary>
+    double GyroX,
+    double GyroY,
+    double GyroZ)
+{
+    public static bool TryFromJson(JsonElement row, out MotionSample sample)
+    {
+        sample = default;
+        if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() != 7) return false;
+
+        Span<double> values = stackalloc double[7];
+        var index = 0;
+        foreach (var cell in row.EnumerateArray())
+        {
+            if (cell.ValueKind != JsonValueKind.Number) return false;
+            values[index++] = cell.GetDouble();
+        }
+
+        sample = new MotionSample(values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
+        return true;
     }
 }
 

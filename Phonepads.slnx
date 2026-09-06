@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Phonepads.App/Phonepads.App.csproj" />
     <Project Path="src/Phonepads.Core/Phonepads.Core.csproj" />
+    <Project Path="src/Phonepads.Dsu/Phonepads.Dsu.csproj" />
     <Project Path="src/Phonepads.Protocol/Phonepads.Protocol.csproj" />
     <Project Path="src/Phonepads.VirtualPads/Phonepads.VirtualPads.csproj" />
   </Folder>

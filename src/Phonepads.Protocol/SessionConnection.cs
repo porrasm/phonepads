@@ -17,7 +17,7 @@ public enum ConnectionStatus
 /// The driver side of a claimed session: receives the snapshot and every event, sends the
 /// lifecycle commands, and reconnects with backoff after a transient drop.
 /// </summary>
-public sealed class SessionConnection(Uri baseUri, string wsPath) : IAsyncDisposable
+public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConnection
 {
     /// <summary>Close codes the protocol defines as terminal — reconnecting would be pointless.</summary>
     private static readonly HashSet<int> TerminalCloseCodes = [4000, 4001, 4004, 4005, 4008, 4010];
@@ -32,6 +32,7 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : IAsyncDispos
     public event Action<PlayerInfo>? PlayerChanged;
     public event Action<string>? PlayerLeft;
     public event Action<string, long, IReadOnlyDictionary<string, ControlValue>>? InputReceived;
+    public event Action<string, IReadOnlyList<MotionSample>>? MotionReceived;
     public event Action<ConnectionStatus>? StatusChanged;
     public event Action<string>? Stopped;
 
@@ -173,6 +174,14 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : IAsyncDispos
             case "input":
                 if (message.PlayerId is { } inputPlayer)
                     InputReceived?.Invoke(inputPlayer, message.Seq, message.ReadControls());
+                break;
+
+            case "motion":
+                if (message.PlayerId is { } motionPlayer)
+                {
+                    var samples = message.ReadMotionSamples();
+                    if (samples.Count > 0) MotionReceived?.Invoke(motionPlayer, samples);
+                }
                 break;
 
             case "error":

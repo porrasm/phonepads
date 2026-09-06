@@ -18,6 +18,8 @@ public enum PadButtons
     DpadDown = 1 << 11,
     DpadLeft = 1 << 12,
     DpadRight = 1 << 13,
+    /// <summary>The Xbox guide button; doubles as Home on a Wii Remote.</summary>
+    Guide = 1 << 14,
 }
 
 /// <summary>

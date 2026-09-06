@@ -12,8 +12,8 @@ public enum SessionPhase
     Ended,
 }
 
-/// <summary>A player in the session together with the pad slot they drive.</summary>
-public sealed record SessionPlayer(PlayerInfo Info, int Slot)
+/// <summary>A player in the session together with the pad slot they drive and what kind of pad it is.</summary>
+public sealed record SessionPlayer(PlayerInfo Info, int Slot, PadBackend Backend)
 {
     /// <summary>Slot given to players beyond the fourth, who get no pad at all (PLAY-2).</summary>
     public const int Unassigned = -1;
@@ -22,23 +22,39 @@ public sealed record SessionPlayer(PlayerInfo Info, int Slot)
 }
 
 /// <summary>
-/// Runs one session end to end: claims it, tracks the lobby, and turns input frames into
-/// virtual pad states. Owns the pads, so closing it leaves nothing behind (PLAY-5).
+/// Runs one session end to end: claims it, tracks the lobby, and turns input frames and
+/// motion samples into virtual pads. Owns the pads, so closing it leaves nothing behind (PLAY-5).
 /// </summary>
-public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
+public sealed class SessionManager : IAsyncDisposable
 {
     /// <summary>Windows accepts at most four XInput controllers, whatever the service allows.</summary>
     public const int MaxPads = 4;
 
+    private readonly IReadOnlyDictionary<PadBackend, IVirtualPadHub> _hubs;
+    private readonly Func<Uri, string, ISessionConnection> _connect;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, SessionPlayer> _players = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _latestSeq = new(StringComparer.Ordinal);
     private readonly Dictionary<int, IVirtualPad> _pads = [];
+    private readonly HashSet<PadBackend> _reportedMissing = [];
 
     private IReadOnlyList<MappedSchema> _offered = [];
-    private SessionConnection? _connection;
+    private ISessionConnection? _connection;
     private CancellationTokenSource? _cts;
     private Task? _pump;
+
+    public SessionManager(IReadOnlyDictionary<PadBackend, IVirtualPadHub> hubs)
+        : this(hubs, (baseUri, wsPath) => new SessionConnection(baseUri, wsPath))
+    {
+    }
+
+    public SessionManager(
+        IReadOnlyDictionary<PadBackend, IVirtualPadHub> hubs,
+        Func<Uri, string, ISessionConnection> connectionFactory)
+    {
+        _hubs = hubs;
+        _connect = connectionFactory;
+    }
 
     public SessionPhase Phase { get; private set; } = SessionPhase.Idle;
 
@@ -55,6 +71,9 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
 
     /// <summary>Raised for every applied input frame, so the UI can show what the game sees (MAP-4).</summary>
     public event Action<string, PadState>? PadUpdated;
+
+    /// <summary>Raised with the newest sample of every motion batch that reached a pad.</summary>
+    public event Action<string, MotionSample>? MotionUpdated;
 
     public IReadOnlyList<SessionPlayer> Players
     {
@@ -77,13 +96,7 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
         int maxPlayers,
         CancellationToken ct)
     {
-        if (offered.Count is < 1 or > 4)
-            throw new ArgumentException("A session offers 1 to 4 schemas.", nameof(offered));
-
-        var problems = offered.SelectMany(s => s.Schema.Validate()).ToList();
-        if (problems.Count > 0)
-            throw new SetupException(string.Join(" ", problems));
-
+        ValidateOffer(offered);
         SetPhase(SessionPhase.Claiming);
 
         var config = new SessionConfig
@@ -105,16 +118,29 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
             throw;
         }
 
+        Attach(client.BaseUri, response, offered);
+        return response;
+    }
+
+    /// <summary>
+    /// Connects to an already claimed session. <see cref="ClaimAsync"/> calls this after the
+    /// setup call; tests call it directly with a fake connection.
+    /// </summary>
+    public void Attach(Uri baseUri, SetupResponse response, IReadOnlyList<MappedSchema> offered)
+    {
+        ValidateOffer(offered);
+
         _offered = offered;
         JoinCode = response.JoinCode;
         JoinUrl = response.JoinUrl;
 
-        var connection = new SessionConnection(client.BaseUri, response.WsPath!);
+        var connection = _connect(baseUri, response.WsPath ?? string.Empty);
         connection.SnapshotReceived += OnSnapshot;
         connection.StateChanged += OnStateChanged;
         connection.PlayerChanged += OnPlayerChanged;
         connection.PlayerLeft += OnPlayerLeft;
         connection.InputReceived += OnInput;
+        connection.MotionReceived += OnMotion;
         connection.StatusChanged += status => ConnectionChanged?.Invoke(status);
         connection.Stopped += reason =>
         {
@@ -128,7 +154,16 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
         _pump = connection.RunAsync(_cts.Token);
 
         SetPhase(SessionPhase.Lobby);
-        return response;
+    }
+
+    private static void ValidateOffer(IReadOnlyList<MappedSchema> offered)
+    {
+        if (offered.Count is < 1 or > 4)
+            throw new ArgumentException("A session offers 1 to 4 schemas.", nameof(offered));
+
+        var problems = offered.SelectMany(s => s.Schema.Validate()).ToList();
+        if (problems.Count > 0)
+            throw new SetupException(string.Join(" ", problems));
     }
 
     /// <summary>Creates the pads for assigned players and tells the service to begin (PLAY-3).</summary>
@@ -136,16 +171,16 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
     {
         if (_connection is null) return;
 
-        if (!hub.IsAvailable)
-        {
-            Notice?.Invoke(hub.UnavailableReason ?? "No virtual controller driver is available.");
-            return;
-        }
-
+        int created;
         lock (_gate)
         {
-            foreach (var player in _players.Values.Where(p => p.HasPad))
-                EnsurePad(player.Slot);
+            created = _players.Values.Count(p => p.HasPad && EnsurePad(p));
+        }
+
+        if (created == 0 && _players.Values.Any(p => p.HasPad))
+        {
+            Notice?.Invoke("No controller could be created for any player, so the game was not started.");
+            return;
         }
 
         await _connection.StartAsync(ct);
@@ -164,6 +199,13 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
     public async Task ResumeAsync(CancellationToken ct)
     {
         if (_connection is null) return;
+
+        // Players may have switched schema while paused; their pad may need to change kind.
+        lock (_gate)
+        {
+            foreach (var player in _players.Values.Where(p => p.HasPad)) EnsurePad(player);
+        }
+
         await _connection.ResumeAsync(ct);
         SetPhase(SessionPhase.Running);
     }
@@ -218,7 +260,12 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
             case "ended":
                 DisposePads();
                 SetPhase(SessionPhase.Ended);
-                Notice?.Invoke(reason is null ? "The session ended." : $"The session ended ({reason}).");
+                Notice?.Invoke(reason switch
+                {
+                    null => "The session ended.",
+                    "driver_lost" => "The service closed the session because this app was away for too long. Claim a new one.",
+                    _ => $"The session ended ({reason}).",
+                });
                 break;
 
             case "waiting_for_players":
@@ -233,14 +280,14 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
         {
             Upsert(info);
 
+            if (!_players.TryGetValue(info.Id, out var player) || !player.HasPad) return;
+
             // A player who drops keeps their slot; their pad just goes quiet (PLAY-6).
-            if (!info.Connected
-                && _players.TryGetValue(info.Id, out var player)
-                && player.HasPad
-                && _pads.TryGetValue(player.Slot, out var pad))
-            {
+            if (!info.Connected && _pads.TryGetValue(player.Slot, out var pad))
                 pad.Reset();
-            }
+
+            // Switching schema mid-session may mean a different kind of pad.
+            if (Phase is SessionPhase.Running or SessionPhase.Paused) EnsurePad(player);
         }
 
         RaisePlayersChanged();
@@ -275,6 +322,23 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
         PadUpdated?.Invoke(playerId, state);
     }
 
+    private void OnMotion(string playerId, IReadOnlyList<MotionSample> samples)
+    {
+        if (samples.Count == 0) return;
+
+        IVirtualPad? pad;
+        lock (_gate)
+        {
+            if (Phase != SessionPhase.Running) return;
+            if (!_players.TryGetValue(playerId, out var player) || !player.HasPad) return;
+            if (!_pads.TryGetValue(player.Slot, out pad)) return;
+        }
+
+        // The stream has no sequence numbers and nothing is deduplicated: every sample counts.
+        pad.PushMotion(samples is MotionSample[] array ? array : samples.ToArray());
+        MotionUpdated?.Invoke(playerId, samples[^1]);
+    }
+
     private MappedSchema SchemaFor(string? schemaId) =>
         _offered.FirstOrDefault(s => string.Equals(s.Schema.Id, schemaId, StringComparison.Ordinal))
         ?? _offered[0];
@@ -282,13 +346,15 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
     /// <summary>Adds or refreshes a player, assigning the next free pad slot on first sight.</summary>
     private void Upsert(PlayerInfo info)
     {
+        var backend = SchemaFor(info.SchemaId).Mapping.Backend;
+
         if (_players.TryGetValue(info.Id, out var existing))
         {
-            _players[info.Id] = existing with { Info = info };
+            _players[info.Id] = existing with { Info = info, Backend = backend };
             return;
         }
 
-        _players[info.Id] = new SessionPlayer(info, NextFreeSlot());
+        _players[info.Id] = new SessionPlayer(info, NextFreeSlot(), backend);
     }
 
     private int NextFreeSlot()
@@ -315,13 +381,36 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
         }
     }
 
-    private void EnsurePad(int slot)
+    /// <summary>
+    /// Makes sure the player's slot holds a pad of the player's backend. Returns false when
+    /// that backend is unavailable on this machine; the reason is reported once.
+    /// </summary>
+    private bool EnsurePad(SessionPlayer player)
     {
-        if (_pads.ContainsKey(slot)) return;
+        if (_pads.TryGetValue(player.Slot, out var existing))
+        {
+            if (existing.Backend == player.Backend) return true;
 
-        var pad = hub.Create(slot);
-        pad.RumbleChanged += (large, small) => OnRumble(slot, large, small);
-        _pads[slot] = pad;
+            existing.Reset();
+            existing.Dispose();
+            _pads.Remove(player.Slot);
+        }
+
+        if (!_hubs.TryGetValue(player.Backend, out var hub) || !hub.IsAvailable)
+        {
+            if (_reportedMissing.Add(player.Backend))
+            {
+                Notice?.Invoke(hub?.UnavailableReason
+                    ?? $"No {PadBackendInfo.Label(player.Backend)} backend is available on this machine.");
+            }
+
+            return false;
+        }
+
+        var pad = hub.Create(player.Slot);
+        pad.RumbleChanged += (large, small) => OnRumble(player.Slot, large, small);
+        _pads[player.Slot] = pad;
+        return true;
     }
 
     private void OnRumble(int slot, byte large, byte small)
@@ -394,7 +483,7 @@ public sealed class SessionManager(IVirtualPadHub hub) : IAsyncDisposable
         if (_connection is not null) await _connection.DisposeAsync();
         _cts?.Dispose();
 
+        // The hubs outlive the session: the next session reuses them.
         DisposePads();
-        hub.Dispose();
     }
 }

@@ -104,6 +104,77 @@ public class SchemaDtoTests
     }
 
     [Fact]
+    public void A_motion_control_serialises_bare()
+    {
+        var dto = new SchemaControl
+        {
+            Id = "imu",
+            Type = ControlType.Motion,
+            Zone = ControlZone.Left, // hints make no sense for a sensor; they must not leak out
+            Size = ControlSize.Large,
+        }.ToDto();
+
+        Assert.Equal("motion", dto.Type);
+        Assert.Null(dto.Mode);
+        Assert.Null(dto.Zone);
+        Assert.Null(dto.Size);
+        Assert.Null(dto.Range);
+    }
+
+    [Fact]
+    public void Two_motion_controls_are_rejected()
+    {
+        var schema = new Schema
+        {
+            Id = "twice",
+            Name = "Twice",
+            Controls =
+            [
+                new SchemaControl { Id = "imu-a", Type = ControlType.Motion },
+                new SchemaControl { Id = "imu-b", Type = ControlType.Motion },
+            ],
+        };
+
+        Assert.Contains(schema.Validate(), p => p.Contains("more than one motion"));
+    }
+
+    [Fact]
+    public void Two_tilt_controls_are_rejected()
+    {
+        var schema = new Schema
+        {
+            Id = "twice",
+            Name = "Twice",
+            Controls =
+            [
+                new SchemaControl { Id = "tilt-a", Type = ControlType.Gyro },
+                new SchemaControl { Id = "tilt-b", Type = ControlType.Gyro },
+            ],
+        };
+
+        Assert.Contains(schema.Validate(), p => p.Contains("more than one tilt"));
+    }
+
+    [Fact]
+    public void A_motion_control_is_never_reported_as_unmapped()
+    {
+        var schema = new Schema
+        {
+            Id = "m",
+            Name = "M",
+            Controls =
+            [
+                new SchemaControl { Id = "imu", Type = ControlType.Motion },
+                new SchemaControl { Id = "fire", Type = ControlType.Button },
+            ],
+        };
+
+        var (unmapped, _) = Mapping.Empty("m").Review(schema);
+
+        Assert.Equal(["fire"], unmapped);
+    }
+
+    [Fact]
     public void Control_order_is_preserved_because_it_drives_the_phone_layout()
     {
         var schema = new Schema
@@ -206,6 +277,56 @@ public class PresetTests
         Assert.Equal(PadTarget.RightBumper, gamecube.Mapping.For("z")?.Target);
         Assert.Equal(PadTarget.Start, gamecube.Mapping.For("start")?.Target);
         Assert.Equal(PadTarget.Dpad, gamecube.Mapping.For("dpad")?.Target);
+    }
+
+    [Fact]
+    public void Wii_presets_drive_the_wii_remote_backend_and_stream_motion()
+    {
+        var wii = Presets.All.Where(p => p.Schema.Id.StartsWith("wii-", StringComparison.Ordinal)).ToList();
+
+        Assert.Equal(3, wii.Count);
+        foreach (var preset in wii)
+        {
+            Assert.Equal(PadBackend.WiiRemote, preset.Mapping.Backend);
+            Assert.True(preset.Schema.HasMotion);
+            Assert.Single(preset.Schema.Controls, c => c.IsMotion);
+            Assert.True(preset.Schema.RequiresGyro);
+        }
+    }
+
+    [Fact]
+    public void Wii_presets_only_use_targets_the_dolphin_profile_understands()
+    {
+        foreach (var preset in Presets.All.Where(p => p.Mapping.Backend == PadBackend.WiiRemote))
+        {
+            foreach (var mapping in preset.Mapping.Controls.Values)
+                Assert.Contains(mapping.Target, WiiLayout.All);
+        }
+    }
+
+    [Fact]
+    public void The_upright_wii_layouts_are_portrait_and_the_sideways_one_is_landscape()
+    {
+        Assert.Equal(SchemaOrientation.Portrait, Presets.ById("wii-remote")!.Schema.Orientation);
+        Assert.Equal(SchemaOrientation.Portrait, Presets.ById("wii-remote-nunchuk")!.Schema.Orientation);
+        Assert.Equal(SchemaOrientation.Landscape, Presets.ById("wii-remote-sideways")!.Schema.Orientation);
+    }
+
+    [Fact]
+    public void The_nunchuk_layout_puts_the_stick_and_c_z_where_dolphin_expects()
+    {
+        var mapping = Presets.ById("wii-remote-nunchuk")!.Mapping;
+
+        Assert.Equal(WiiLayout.NunchukStick, mapping.For("stick")?.Target);
+        Assert.Equal(WiiLayout.NunchukC, mapping.For("c")?.Target);
+        Assert.Equal(WiiLayout.NunchukZ, mapping.For("z")?.Target);
+    }
+
+    [Fact]
+    public void Xbox_presets_never_stream_motion()
+    {
+        foreach (var preset in Presets.All.Where(p => p.Mapping.Backend == PadBackend.XInput))
+            Assert.False(preset.Schema.HasMotion);
     }
 
     [Fact]

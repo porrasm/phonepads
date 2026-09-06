@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Phonepads.App.Services;
 using Phonepads.Core;
+using Phonepads.Dsu;
 using Phonepads.Protocol;
 using Phonepads.VirtualPads;
 
@@ -23,19 +25,28 @@ namespace Phonepads.App.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private readonly AppSettings _settings;
-    private readonly IVirtualPadHub _hub;
+    private readonly IReadOnlyDictionary<PadBackend, IVirtualPadHub> _hubs;
     private readonly Dictionary<string, PlayerRowViewModel> _rows = new(StringComparer.Ordinal);
 
     private SessionManager? _session;
 
-    public MainViewModel() : this(PortableStorage.Load(), ViGEmPadHub.Detect())
+    public MainViewModel() : this(PortableStorage.Load())
     {
     }
 
-    public MainViewModel(AppSettings settings, IVirtualPadHub hub)
+    private MainViewModel(AppSettings settings)
+        : this(settings, new Dictionary<PadBackend, IVirtualPadHub>
+        {
+            [PadBackend.XInput] = ViGEmPadHub.Detect(),
+            [PadBackend.WiiRemote] = DsuPadHub.Start(settings.DsuPort),
+        })
+    {
+    }
+
+    public MainViewModel(AppSettings settings, IReadOnlyDictionary<PadBackend, IVirtualPadHub> hubs)
     {
         _settings = settings;
-        _hub = hub;
+        _hubs = hubs;
 
         GameName = settings.GameName ?? string.Empty;
         BaseUrl = settings.BaseUrl;
@@ -56,10 +67,17 @@ public partial class MainViewModel : ViewModelBase
         foreach (var option in remembered.Count > 0 ? remembered : [SchemaOptions[0]])
             option.IsSelected = true;
 
-        DriverAvailable = hub.IsAvailable;
-        DriverMessage = hub.IsAvailable
+        var xinput = hubs[PadBackend.XInput];
+        DriverAvailable = xinput.IsAvailable;
+        DriverMessage = xinput.IsAvailable
             ? "ViGEmBus driver found."
-            : hub.UnavailableReason ?? "No controller driver found.";
+            : xinput.UnavailableReason ?? "No controller driver found.";
+
+        var wii = hubs[PadBackend.WiiRemote];
+        WiiAvailable = wii.IsAvailable;
+        WiiMessage = wii.IsAvailable
+            ? $"DSU server listening on {(wii as DsuPadHub)?.EndPoint ?? "127.0.0.1:" + settings.DsuPort}."
+            : wii.UnavailableReason ?? "Wii Remote mode is unavailable.";
     }
 
     // ---- Setup ----
@@ -91,6 +109,12 @@ public partial class MainViewModel : ViewModelBase
     public partial string DriverMessage { get; set; }
 
     [ObservableProperty]
+    public partial bool WiiAvailable { get; set; }
+
+    [ObservableProperty]
+    public partial string WiiMessage { get; set; }
+
+    [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
     [ObservableProperty]
@@ -99,18 +123,32 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    public string DolphinInstructions =>
+        $"In Dolphin: Controllers → Alternate Input Sources → enable the DSU client and add " +
+        $"{(_hubs[PadBackend.WiiRemote] as DsuPadHub)?.EndPoint ?? "127.0.0.1:" + _settings.DsuPort} " +
+        $"with the description \"{DolphinProfile.ServerDescription}\". Then set each Wii Remote to " +
+        "Emulated and load the matching Phonepads profile — the button below writes them.";
+
     public string SelectionSummary
     {
         get
         {
-            var count = SchemaOptions.Count(o => o.IsSelected);
-            return count switch
+            var chosen = SchemaOptions.Where(o => o.IsSelected).ToList();
+            var count = chosen.Count;
+            var text = count switch
             {
                 0 => "Choose at least one layout.",
                 > 4 => "Choose at most four layouts.",
                 1 => "1 layout offered.",
                 _ => $"{count} layouts offered — players pick on their phones.",
             };
+
+            if (chosen.Any(o => o.IsWiiRemote) && !WiiAvailable)
+                text += " Wii Remote layouts are selected but Wii Remote mode is unavailable.";
+            if (chosen.Any(o => !o.IsWiiRemote) && !DriverAvailable)
+                text += " Xbox layouts are selected but the ViGEmBus driver is missing.";
+
+            return text;
         }
     }
 
@@ -137,7 +175,7 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsSessionVisible => Phase is SessionPhase.Lobby or SessionPhase.Running or SessionPhase.Paused;
 
-    public bool CanStart => Phase == SessionPhase.Lobby && DriverAvailable;
+    public bool CanStart => Phase == SessionPhase.Lobby && (DriverAvailable || WiiAvailable);
 
     public bool CanPause => Phase == SessionPhase.Running;
 
@@ -183,7 +221,7 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var session = new SessionManager(_hub) { RumbleEnabled = RumbleEnabled };
+            var session = new SessionManager(_hubs) { RumbleEnabled = RumbleEnabled };
             Subscribe(session);
 
             var client = new DriverClient(new System.Net.Http.HttpClient(), baseUri);
@@ -266,6 +304,33 @@ public partial class MainViewModel : ViewModelBase
         if (JoinUrl is not null) OpenBrowser(JoinUrl);
     }
 
+    /// <summary>
+    /// Writes the Dolphin profiles beside the executable and, when a Dolphin install is found
+    /// in the usual place, straight into its profile folder as well.
+    /// </summary>
+    [RelayCommand]
+    private void WriteDolphinProfiles()
+    {
+        try
+        {
+            var local = Path.Combine(PortableStorage.Root, "dolphin", "Wiimote");
+            DolphinProfile.WriteAll(local);
+            var targets = new List<string> { local };
+
+            foreach (var dolphinDir in DolphinProfile.FindDolphinProfileDirectories())
+            {
+                DolphinProfile.WriteAll(dolphinDir);
+                targets.Add(dolphinDir);
+            }
+
+            StatusMessage = "Dolphin profiles written to: " + string.Join("  |  ", targets);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ErrorMessage = "Could not write the Dolphin profiles: " + ex.Message;
+        }
+    }
+
     // ---- Wiring ----
 
     private void Subscribe(SessionManager session)
@@ -288,6 +353,11 @@ public partial class MainViewModel : ViewModelBase
         session.PadUpdated += (playerId, state) => OnUiThread(() =>
         {
             if (_rows.TryGetValue(playerId, out var row)) row.ShowPad(state);
+        });
+
+        session.MotionUpdated += (playerId, sample) => OnUiThread(() =>
+        {
+            if (_rows.TryGetValue(playerId, out var row)) row.ShowMotion(sample);
         });
     }
 
@@ -345,6 +415,8 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnDriverAvailableChanged(bool value) => OnPropertyChanged(nameof(CanStart));
 
+    partial void OnWiiAvailableChanged(bool value) => OnPropertyChanged(nameof(CanStart));
+
     private static void OnUiThread(Action action)
     {
         if (Dispatcher.UIThread.CheckAccess()) action();
@@ -380,9 +452,7 @@ public partial class MainViewModel : ViewModelBase
             await _session.DisposeAsync();
             _session = null;
         }
-        else
-        {
-            _hub.Dispose();
-        }
+
+        foreach (var hub in _hubs.Values) hub.Dispose();
     }
 }

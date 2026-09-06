@@ -2,6 +2,7 @@ using System;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Phonepads.Core;
+using Phonepads.Protocol;
 
 namespace Phonepads.App.ViewModels;
 
@@ -24,12 +25,15 @@ public partial class PlayerRowViewModel(SessionPlayer player) : ViewModelBase
     public partial string SchemaName { get; set; } = player.Info.SchemaId ?? "—";
 
     [ObservableProperty]
-    public partial string SlotLabel { get; set; } =
-        player.HasPad ? $"Pad {player.Slot + 1}" : "No pad";
+    public partial string SlotLabel { get; set; } = DescribeSlot(player);
 
     /// <summary>Live pad state, so a mapping can be checked without alt-tabbing into a game.</summary>
     [ObservableProperty]
     public partial string PadState { get; set; } = "idle";
+
+    /// <summary>Newest inertial sample, so a Wii Remote's motion feed can be seen arriving.</summary>
+    [ObservableProperty]
+    public partial string MotionState { get; set; } = string.Empty;
 
     public string Id { get; } = player.Info.Id;
 
@@ -51,8 +55,6 @@ public partial class PlayerRowViewModel(SessionPlayer player) : ViewModelBase
         }
     }
 
-    partial void OnColorChanged(string value) => OnPropertyChanged(nameof(Swatch));
-
     public void Update(SessionPlayer player, string schemaName)
     {
         Name = player.Info.Name;
@@ -60,13 +62,15 @@ public partial class PlayerRowViewModel(SessionPlayer player) : ViewModelBase
         Ready = player.Info.Ready;
         Connected = player.Info.Connected;
         SchemaName = schemaName;
-        SlotLabel = player.HasPad ? $"Pad {player.Slot + 1}" : "No pad";
+        SlotLabel = DescribeSlot(player);
         OnPropertyChanged(nameof(StatusLine));
     }
 
     partial void OnReadyChanged(bool value) => OnPropertyChanged(nameof(StatusLine));
 
     partial void OnConnectedChanged(bool value) => OnPropertyChanged(nameof(StatusLine));
+
+    partial void OnColorChanged(string value) => OnPropertyChanged(nameof(Swatch));
 
     /// <summary>Renders a pad state compactly enough to read at a glance while playing.</summary>
     public void ShowPad(PadState state)
@@ -78,5 +82,18 @@ public partial class PlayerRowViewModel(SessionPlayer player) : ViewModelBase
             $"LT {state.LeftTrigger} RT {state.RightTrigger}  {buttons}";
     }
 
+    public void ShowMotion(MotionSample sample) =>
+        MotionState =
+            $"acc({G(sample.AccelX)},{G(sample.AccelY)},{G(sample.AccelZ)})g " +
+            $"gyro({Deg(sample.GyroX)},{Deg(sample.GyroY)},{Deg(sample.GyroZ)})°/s";
+
+    private static string DescribeSlot(SessionPlayer player) => player.HasPad
+        ? (player.Backend == PadBackend.WiiRemote ? $"Wii {player.Slot + 1}" : $"Pad {player.Slot + 1}")
+        : "No pad";
+
     private static string Axis(short value) => (value / 32767d).ToString("+0.00;-0.00; 0.00");
+
+    private static string G(double value) => value.ToString("+0.00;-0.00; 0.00");
+
+    private static string Deg(double value) => value.ToString("+0;-0; 0");
 }

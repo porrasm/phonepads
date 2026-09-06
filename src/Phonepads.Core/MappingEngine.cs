@@ -175,6 +175,7 @@ public static class MappingEngine
         PadTarget.DpadDown => PadButtons.DpadDown,
         PadTarget.DpadLeft => PadButtons.DpadLeft,
         PadTarget.DpadRight => PadButtons.DpadRight,
+        PadTarget.Guide => PadButtons.Guide,
         _ => PadButtons.None,
     };
 }

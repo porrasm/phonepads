@@ -96,6 +96,20 @@ public class MappingEngineTests
     }
 
     [Fact]
+    public void The_guide_button_is_reachable()
+    {
+        var schema = SchemaWith(Button("home"));
+        var mapping = MappingOf(("home", PadTarget.Guide));
+
+        var state = MappingEngine.Apply(schema, mapping, new Dictionary<string, ControlValue>
+        {
+            ["home"] = ControlValue.Button(true),
+        });
+
+        Assert.True(state.IsPressed(PadButtons.Guide));
+    }
+
+    [Fact]
     public void A_button_on_a_trigger_presses_it_fully()
     {
         var schema = SchemaWith(Button("fire"));

@@ -17,6 +17,13 @@ public partial class SchemaOptionViewModel(MappedSchema mapped) : ViewModelBase
 
     public bool RequiresGyro => Mapped.Schema.RequiresGyro;
 
+    public PadBackend Backend => Mapped.Mapping.Backend;
+
+    public bool IsWiiRemote => Backend == PadBackend.WiiRemote;
+
+    /// <summary>What the game will see: an Xbox pad works everywhere, a Wii Remote only in Dolphin.</summary>
+    public string BackendLabel => IsWiiRemote ? "Wii Remote · Dolphin" : "Xbox controller";
+
     /// <summary>Reads out the controls in layout order, which is also importance order.</summary>
     public string Summary => string.Join(", ", Mapped.Schema.Controls.Select(Describe));
 
@@ -24,6 +31,7 @@ public partial class SchemaOptionViewModel(MappedSchema mapped) : ViewModelBase
     {
         ControlType.Button => control.Label ?? control.Id,
         ControlType.Gyro => control.Id + " (tilt)",
+        ControlType.Motion => "motion sensors",
         _ => control.Mode switch
         {
             ControlMode.Dpad => control.Id + " (dpad)",

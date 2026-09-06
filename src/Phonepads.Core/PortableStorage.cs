@@ -11,6 +11,9 @@ public sealed class AppSettings
     [JsonPropertyName("driverToken")] public string? DriverToken { get; set; }
     [JsonPropertyName("lastSchemaIds")] public List<string> LastSchemaIds { get; set; } = [];
     [JsonPropertyName("rumbleEnabled")] public bool RumbleEnabled { get; set; } = true;
+
+    /// <summary>UDP port of the DSU server that Dolphin connects to for Wii Remote mode.</summary>
+    [JsonPropertyName("dsuPort")] public int DsuPort { get; set; } = 26760;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

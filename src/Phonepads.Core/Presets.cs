@@ -13,6 +13,9 @@ public static class Presets
     [
         GenericGamepad(),
         GameCube(),
+        WiiRemote(),
+        WiiRemoteNunchuk(),
+        WiiRemoteSideways(),
         TwinStick(),
         Racing(),
         Platformer(),
@@ -45,7 +48,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("generic-gamepad", new()
+        return new MappedSchema(schema, Map("generic-gamepad", PadBackend.XInput, new()
         {
             ["move"] = PadTarget.LeftStick,
             ["look"] = PadTarget.RightStick,
@@ -91,7 +94,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("gamecube", new()
+        return new MappedSchema(schema, Map("gamecube", PadBackend.XInput, new()
         {
             ["stick"] = PadTarget.LeftStick,
             ["a"] = PadTarget.A,
@@ -105,6 +108,119 @@ public static class Presets
             ["dpad"] = PadTarget.Dpad,
         }));
     }
+
+    /// <summary>
+    /// The phone held like a Wii Remote: upright, top edge toward the TV, screen up. The layout
+    /// is portrait for that reason — the motion feed is in the phone's own frame, so the phone
+    /// simply <i>is</i> the remote's body and must be held like one.
+    /// </summary>
+    private static MappedSchema WiiRemote()
+    {
+        var schema = new Schema
+        {
+            Id = "wii-remote",
+            Name = "Wii Remote",
+            Orientation = SchemaOrientation.Portrait,
+            IsPreset = true,
+            Controls =
+            [
+                Button("a", "A", size: ControlSize.Large),
+                // B is the trigger under a real remote; the top-left pill is the nearest thing.
+                Button("b", "B", ControlZone.ShoulderLeft, ControlSize.Large),
+                Dpad("dpad", ControlZone.Unspecified, ControlSize.Medium),
+                Button("one", "1"),
+                Button("two", "2"),
+                Button("minus", "−", ControlZone.Aux, ControlSize.Small),
+                Button("home", "Home", ControlZone.Aux, ControlSize.Small),
+                Button("plus", "+", ControlZone.Aux, ControlSize.Small),
+                // Gyro pointing drifts; players will need this every few minutes.
+                Button("recenter", "Recenter", ControlZone.ShoulderRight),
+                Motion("motion"),
+            ],
+        };
+
+        return new MappedSchema(schema, Map("wii-remote", PadBackend.WiiRemote, WiiButtons()));
+    }
+
+    private static MappedSchema WiiRemoteNunchuk()
+    {
+        var schema = new Schema
+        {
+            Id = "wii-remote-nunchuk",
+            Name = "Wii Remote + Nunchuk",
+            Orientation = SchemaOrientation.Portrait,
+            IsPreset = true,
+            Controls =
+            [
+                Stick("stick", ControlZone.Left, ControlSize.Large),
+                Button("a", "A", ControlZone.Right, ControlSize.Large),
+                Button("b", "B", ControlZone.ShoulderRight, ControlSize.Large),
+                Button("z", "Z", ControlZone.ShoulderLeft, ControlSize.Large),
+                Button("c", "C", ControlZone.ShoulderLeft),
+                Dpad("dpad", ControlZone.Unspecified, ControlSize.Small),
+                Button("one", "1"),
+                Button("two", "2"),
+                Button("minus", "−", ControlZone.Aux, ControlSize.Small),
+                Button("home", "Home", ControlZone.Aux, ControlSize.Small),
+                Button("plus", "+", ControlZone.Aux, ControlSize.Small),
+                Button("recenter", "Recenter", ControlZone.Aux, ControlSize.Small),
+                Motion("motion"),
+            ],
+        };
+
+        var targets = WiiButtons();
+        targets["stick"] = WiiLayout.NunchukStick;
+        targets["c"] = WiiLayout.NunchukC;
+        targets["z"] = WiiLayout.NunchukZ;
+
+        return new MappedSchema(schema, Map("wii-remote-nunchuk", PadBackend.WiiRemote, targets));
+    }
+
+    /// <summary>
+    /// The remote held sideways, NES-style, for Mario Kart and the 2D Marios. Landscape is
+    /// correct here: a sideways phone is a sideways remote, and the game expects exactly that.
+    /// Dolphin's "Sideways Wii Remote" option does the button rotation.
+    /// </summary>
+    private static MappedSchema WiiRemoteSideways()
+    {
+        var schema = new Schema
+        {
+            Id = "wii-remote-sideways",
+            Name = "Wii Remote (sideways)",
+            Orientation = SchemaOrientation.Landscape,
+            IsPreset = true,
+            Controls =
+            [
+                Dpad("dpad", ControlZone.Left, ControlSize.Large),
+                Button("two", "2", ControlZone.Right, ControlSize.Large),
+                Button("one", "1", ControlZone.Right),
+                Button("a", "A", ControlZone.ShoulderRight),
+                Button("b", "B", ControlZone.ShoulderLeft),
+                Button("minus", "−", ControlZone.Aux, ControlSize.Small),
+                Button("home", "Home", ControlZone.Aux, ControlSize.Small),
+                Button("plus", "+", ControlZone.Aux, ControlSize.Small),
+                Motion("motion"),
+            ],
+        };
+
+        var targets = WiiButtons();
+        targets.Remove("recenter");
+
+        return new MappedSchema(schema, Map("wii-remote-sideways", PadBackend.WiiRemote, targets));
+    }
+
+    private static Dictionary<string, PadTarget> WiiButtons() => new()
+    {
+        ["a"] = WiiLayout.A,
+        ["b"] = WiiLayout.B,
+        ["one"] = WiiLayout.One,
+        ["two"] = WiiLayout.Two,
+        ["plus"] = WiiLayout.Plus,
+        ["minus"] = WiiLayout.Minus,
+        ["home"] = WiiLayout.Home,
+        ["dpad"] = WiiLayout.Dpad,
+        ["recenter"] = WiiLayout.Recenter,
+    };
 
     private static MappedSchema TwinStick()
     {
@@ -122,7 +238,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("twin-stick", new()
+        return new MappedSchema(schema, Map("twin-stick", PadBackend.XInput, new()
         {
             ["move"] = PadTarget.LeftStick,
             ["aim"] = PadTarget.RightStick,
@@ -154,7 +270,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("racing", new()
+        return new MappedSchema(schema, Map("racing", PadBackend.XInput, new()
         {
             ["steer"] = PadTarget.LeftStickX,
             ["accelerate"] = PadTarget.RightTrigger,
@@ -177,7 +293,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("platformer", new()
+        return new MappedSchema(schema, Map("platformer", PadBackend.XInput, new()
         {
             ["move"] = PadTarget.Dpad,
             ["jump"] = PadTarget.A,
@@ -205,7 +321,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("fighting", new()
+        return new MappedSchema(schema, Map("fighting", PadBackend.XInput, new()
         {
             ["move"] = PadTarget.Dpad,
             ["lp"] = PadTarget.X,
@@ -231,7 +347,7 @@ public static class Presets
             ],
         };
 
-        return new MappedSchema(schema, Map("party-minimal", new()
+        return new MappedSchema(schema, Map("party-minimal", PadBackend.XInput, new()
         {
             ["move"] = PadTarget.Dpad,
             ["go"] = PadTarget.A,
@@ -272,9 +388,16 @@ public static class Presets
         Size = size,
     };
 
-    private static Mapping Map(string schemaId, Dictionary<string, PadTarget> targets) => new()
+    private static SchemaControl Motion(string id) => new()
+    {
+        Id = id,
+        Type = ControlType.Motion,
+    };
+
+    private static Mapping Map(string schemaId, PadBackend backend, Dictionary<string, PadTarget> targets) => new()
     {
         SchemaId = schemaId,
+        Backend = backend,
         Controls = targets.ToDictionary(
             pair => pair.Key,
             pair => new ControlMapping { Target = pair.Value },

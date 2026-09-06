@@ -48,5 +48,6 @@
     <ProjectReference Include="..\Phonepads.Core\Phonepads.Core.csproj" />
     <ProjectReference Include="..\Phonepads.Protocol\Phonepads.Protocol.csproj" />
     <ProjectReference Include="..\Phonepads.VirtualPads\Phonepads.VirtualPads.csproj" />
+    <ProjectReference Include="..\Phonepads.Dsu\Phonepads.Dsu.csproj" />
   </ItemGroup>
 </Project>

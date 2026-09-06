@@ -2,6 +2,7 @@ using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using Phonepads.Core;
+using Phonepads.Protocol;
 
 namespace Phonepads.VirtualPads;
 
@@ -20,6 +21,8 @@ public sealed class ViGEmPadHub : IVirtualPadHub
         _client = client;
         UnavailableReason = unavailableReason;
     }
+
+    public PadBackend Backend => PadBackend.XInput;
 
     public bool IsAvailable => _client is not null;
 
@@ -73,7 +76,14 @@ public sealed class ViGEmPadHub : IVirtualPadHub
 
         public int Slot { get; }
 
+        public PadBackend Backend => PadBackend.XInput;
+
         public event Action<byte, byte>? RumbleChanged;
+
+        /// <summary>XInput has no motion channel; the samples have nowhere to go.</summary>
+        public void PushMotion(ReadOnlySpan<MotionSample> samples)
+        {
+        }
 
         public void Update(PadState state)
         {
@@ -100,6 +110,7 @@ public sealed class ViGEmPadHub : IVirtualPadHub
             _controller.SetButtonState(Xbox360Button.Down, state.IsPressed(PadButtons.DpadDown));
             _controller.SetButtonState(Xbox360Button.Left, state.IsPressed(PadButtons.DpadLeft));
             _controller.SetButtonState(Xbox360Button.Right, state.IsPressed(PadButtons.DpadRight));
+            _controller.SetButtonState(Xbox360Button.Guide, state.IsPressed(PadButtons.Guide));
 
             _controller.SubmitReport();
         }
