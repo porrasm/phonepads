@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/shared/">
+    <Project Path="../shared/Phonepads.Protocol/Phonepads.Protocol.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MobileKbm.App/MobileKbm.App.csproj" />
+    <Project Path="src/MobileKbm.Core/MobileKbm.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MobileKbm.Tests/MobileKbm.Tests.csproj" />
+  </Folder>
+</Solution>

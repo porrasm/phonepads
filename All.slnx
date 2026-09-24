@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/shared/">
+    <Project Path="shared/Phonepads.Protocol/Phonepads.Protocol.csproj" />
+  </Folder>
+  <Folder Name="/phonepads/">
+    <Project Path="phonepads/src/Phonepads.App/Phonepads.App.csproj" />
+    <Project Path="phonepads/src/Phonepads.Core/Phonepads.Core.csproj" />
+    <Project Path="phonepads/src/Phonepads.Dsu/Phonepads.Dsu.csproj" />
+    <Project Path="phonepads/src/Phonepads.VirtualPads/Phonepads.VirtualPads.csproj" />
+    <Project Path="phonepads/tests/Phonepads.Tests/Phonepads.Tests.csproj" />
+  </Folder>
+  <Folder Name="/mobile-kbm/">
+    <Project Path="mobile-kbm/src/MobileKbm.App/MobileKbm.App.csproj" />
+    <Project Path="mobile-kbm/src/MobileKbm.Core/MobileKbm.Core.csproj" />
+    <Project Path="mobile-kbm/tests/MobileKbm.Tests/MobileKbm.Tests.csproj" />
+  </Folder>
+</Solution>

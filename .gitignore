@@ -27,3 +27,6 @@ phonepads.settings.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+## Portable app data written beside the mobile-kbm executable at runtime
+mobile-kbm.settings.json

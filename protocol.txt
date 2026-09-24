@@ -1,10 +1,6 @@
-Home
-/
-Gamepad
 Gamepad — how to use
-Beta
 Back to the app
-This app is in beta. It is a work in progress: features, the driver API and the WebSocket protocol — everything on this page — can still change without notice. Don't build anything on it yet that you can't afford to update.
+Protocol version 1 is frozen. What this page documents will keep working: later versions only add — new optional fields, new message types, new values in the lists below. Build on it, and write your driver to ignore anything it does not recognize.
 
 The source code will eventually be shared under a free-to-use open source license.
 
@@ -18,12 +14,13 @@ Driver — the game itself. It exchanges the setup code for the session and cont
 Players — anyone with the join code. No account needed.
 Playing (with your phone)
 Open this page on your phone and enter the join code shown by the game or the host — or scan the QR code / open the join link if one is shared. No account or install is needed.
-In the lobby, pick your name and color (both must be unique in the session) and, if the game offers several control layouts, choose one. Tap Ready when you are set.
+In the lobby, pick your name and color (both must be unique in the session) and, if the game offers several control layouts, choose one. Some games also offer Real gamepad: pair a controller with your phone over Bluetooth (or plug it in), pick that option, and press any button on the controller — the phone just relays it. Tap Ready when you are set.
 When the game starts, your phone becomes the controller. Layouts that need two thumbs come up sideways on their own — just turn the phone to match; it never re-arranges mid-game, even if your phone rotates the screen while you tilt. Tap ⟳ Rotate at the top edge to turn the layout the other way. Tip: lock rotation in your phone's settings while you play (on iPhone the lock is portrait-only, and that is fine).
+The automatic layout is a first draft — make it yours. Open Menu in the header (it also comes up whenever the game pauses) and tap Edit layout — or edit it before the game even starts, from Try the controller in the lobby. Drag any control where your thumb wants it, pinch it bigger or smaller, then Done. Dragging one control lines it up with the others: it clicks into place when its center meets another control's or the middle of the screen, and a line shows what it caught. Hold a finger still on a joystick to swap it between a fixed center and a pad that centers wherever your thumb lands. Reset layout brings the automatic one back. Games that identify themselves remember your layout for next time; the app says so when one does not. Some games need their controls exactly where they put them — those show no Edit layout button at all.
 Closed the tab or lost connection? Just reopen the page — your spot is remembered on this device and you rejoin instantly. Use Leave if you want to give up your spot for good.
 If the game itself drops out and stays away for a few minutes, the session closes and you are back on the start page. The host (or the game) hands out a new join code; a game that remembers its players lets you simply tap your own name to rejoin.
 Try it — an example controller
-This is the real thing, not a mockup: the same layout engine, control components and input pipeline the phone controller uses, rendered from an example schema with one control of every kind — a full joystick (drive), an x-axis slider (aim), a dpad (hat), a button (fire) and a tilt sensor (lean — the chip at the top edge; it streams only on a device with motion sensors). Drag and tap: below the controller is exactly the input message a driver would receive.
+This is the real thing, not a mockup: the same layout engine, control components and input pipeline the phone controller uses, rendered from an example schema with one control of every kind — a full joystick (drive), an x-axis slider (aim), a dpad (hat), a button (fire) and a tilt sensor (lean — the chip at the top edge; it streams only on a device with motion sensors). Drag and tap: below the controller is exactly the input message a driver would receive. To feel the "relative" pad, open the schema editor under the demo and change a joystick's mode to it.
 
 // Touch the controller — the input frame the driver
 // receives appears here.
@@ -43,21 +40,34 @@ Developer guide: connect your game
 Everything a driver needs is plain HTTP + WebSocket JSON on the same host as this page — no SDK or special client required. The flow:
 
 1. A host creates a session in the web app → reads you their setup code
-2. POST /api/gamepad/driver/setup  { setupCode, config? }
-     → { driverToken, joinCode, joinUrl, wsPath, ... }
+   (or issues you a driver key once — see "Driver keys" below)
+2. POST /api/gamepad/driver/setup  { setupCode, config?, protocolVersion? }
+     → { driverToken, joinCode, joinUrl, wsUrl, ... }
 3. Show joinCode / render joinUrl as a QR code; players join on phones
-4. Connect the WebSocket (wsPath) → watch players get ready
+4. Connect the WebSocket (wsUrl) → watch players get ready
 5. Send {"type":"start"} → receive input frames → play!
 1. Claim the session (HTTP setup)
-POST https://localhost:3000/api/gamepad/driver/setup — JSON body, no auth (the setup code is the credential), rate limited to 10 requests/min per IP. The setup code is single-use: it is consumed by this call and exchanged for a long-lived driver token.
+POST https://gamepad.porras.club/api/gamepad/driver/setup — JSON body, no auth (the setup code is the credential), rate limited to 10 requests/min per IP. The setup code is single-use: it is consumed by this call and exchanged for a long-lived driver token.
 
 {
   "setupCode": "ABC234",
+  "protocolVersion": 1,            // optional; the version your driver speaks
   "config": {                      // optional; omit → one generic gamepad
     "game": "Tank Game",           // shown to players
+    "driverAppUuid": "7d3a2c1e-…", // optional; a UUID you generate ONCE and
+                                   // ship with your game — phones file the
+                                   // layouts players edit under it
     "minPlayers": 1,               // default 1
     "maxPlayers": 8,               // default 8, hard cap 12
-    "schemas": [                   // 1–4 control layouts players pick from
+    "allowPhysicalGamepad": false, // true adds a "Real gamepad" option: a
+                                   // controller paired with the phone (see
+                                   // "Real gamepads" below)
+    "disallowLayoutCustomization": false, // true: no player layout editor,
+                                   // the controller is exactly as described
+    "private": false,              // true: invite-only — see "Private"
+    "skipLobby": false,            // true: no rounds — see "No lobby"
+    "allowLateJoin": false,        // true lets players join mid-game
+    "schemas": [                   // 1–32 control layouts players pick from
       {
         "id": "tank",              // kebab-case ids everywhere
         "name": "Tank",
@@ -67,15 +77,43 @@ POST https://localhost:3000/api/gamepad/driver/setup — JSON body, no auth (the
                                    // most-important-first (drives layout)
           { "type": "joystick", "id": "drive",                // mode "full"
             "zone": "left", "size": "large" },   // optional layout hints
-          { "type": "joystick", "id": "aim",  "mode": "x" },  // "x"|"y"|"dpad"
-          { "type": "button",   "id": "fire", "label": "Fire" },
+          { "type": "joystick", "id": "aim",  "mode": "x" },  // "x" | "y" |
+                                   // "dpad" | "relative" — see "Joystick
+                                   // modes" below
+          { "type": "button",   "id": "fire", "label": "Fire",
+            "shape": "rect" },     // optional "round" (default) | "rect"
+          { "type": "button",   "id": "jump", "label": "Jump",
+            "x": 85, "y": 40 },  // optional exact center, % of the
+                                   // controller's width / height
           { "type": "gyro",     "id": "lean", "range": 45 },  // tilt sensor;
                                    // mode "full"|"x"|"y", range in degrees
-          { "type": "motion",   "id": "imu" }                 // raw IMU stream
+          { "type": "motion",   "id": "imu" },                // raw IMU stream
                                    // (emulators; see "Raw motion" below)
+          { "type": "text", "id": "answer", "label": "Answer" }  // opens the
+                                   // player's keyboard (see "Text input")
+        ]
+      },
+      {
+        "id": "touchpad", "name": "Touchpad",
+        "controls": [
+          { "type": "raw", "id": "touch" }  // the background as one touch
+                                   // surface, under any other controls
+                                   // (see "Raw touch" below)
+        ]
+      },
+      {
+        "id": "mouse", "name": "Mouse",
+        "controls": [
+          { "type": "touchpad", "id": "pad",   // a laid-out touch surface,
+            "aspect": 1.5 },       // width / height 0.25–4 (see "Touchpad")
+          { "type": "joystick", "id": "scroll", "mode": "y" },
+          { "type": "button", "id": "left",  "label": "Left",  "shape": "rect" },
+          { "type": "button", "id": "right", "label": "Right", "shape": "rect" }
         ]
       }
     ],
+    "capabilities": [],            // optional: opt-in features your driver
+                                   // supports (free strings, max 16)
     "colors": ["#FF6B6B", "..."],  // optional #RRGGBB palette; unique,
                                    // length >= maxPlayers (default: 12 colors)
     "roster": [                    // optional: predefined players (see
@@ -84,11 +122,16 @@ POST https://localhost:3000/api/gamepad/driver/setup — JSON body, no auth (the
     ]
   }
 }
-The phone lays controls out itself — you describe what controls exist (array order = importance), never where they go. The optional layout hints state intent without pixel control, and unhinted controls fall back to the order-based heuristics:
+The phone lays controls out itself — you describe what controls exist (array order = importance), not where they go. The optional layout hints state intent without pixel control, and unhinted controls fall back to the order-based heuristics. When a game needs the controls exactly where it says, x / y positions and disallowLayoutCustomization (further down) do that:
 
 zone per control: "left" / "right" claim that thumb (a joystick corner, or a button diamond of up to four — more spill to that side's shoulder row), "shoulder-left" / "shoulder-right" are pills along the top edge, "aux" is a small top-center row for rarely-used controls (pause, menu).
 size per control: "small" / "medium" / "large" — visual weight relative to the zone's default, never pixels.
 orientation per schema: "landscape" always demands landscape, "portrait" declares a one-handed portrait controller, "auto" (default) lets the control count decide. The phone owns the orientation: it renders the controller the demanded way whatever the device's own rotation does (rotating the content itself when the OS will not), and never re-lays it out mid-game. Players can lock rotation on their phone and still play landscape.
+driverAppUuid per config: the automatic layout is a first draft that players can edit on their phone (drag and pinch every control, and swap a stick between "full" and "relative" — both send {x, y}, so your code never notices — from the in-game menu). Send the same UUID on every setup call and each phone remembers a player's edited layouts for your game (per schema id) across sessions; without it, edits last for one session only. Nothing about it reaches the driver: input frames are the same whatever the controls look like.
+x / y per button or joystick: an exact position — the control's center as a percentage (0–100) of the controller's width and height, from the top-left. Each axis is optional on its own (an axis left out keeps the automatic placement). The phone still sizes the control from its zone and size and only clamps the box so it stays on-screen. Percentages are of the box the layout renders in, so lock orientation for a fixed layout, and position every control in a schema or none — a positioned control still takes its slot in the automatic flow for the others.
+disallowLayoutCustomization per config: makes your layout final. Players get no Edit layout / Reset layout, no stick-mode swap, and layouts they edited in an earlier session of your game are not applied. Default false; independent of positions (lock a hinted layout, or position controls and still let players adjust them).
+capabilities is where a driver declares optional features it supports, as plain strings (up to 16, 32 characters each). The server keeps the list verbatim and never interprets it, and both the server and the phone ignore any name they do not know — so declaring one is always safe, even against an older server. It is also visible to players in the snapshot's config. Nothing is required today; "webrtc" is reserved for the planned direct phone-to-driver transport.
+
 Success response:
 
 {
@@ -98,7 +141,8 @@ Success response:
   "joinCode": "XYZ789",        // what players type in
   "joinUrl": "https://…",      // ready to render as a QR code
   "driverToken": "…",          // SAVE THIS — your only way to reconnect
-  "wsPath": "/api/gamepad/ws?role=driver&token=…",
+  "wsUrl": "wss://…/api/gamepad/ws?role=driver&token=…",  // connect to this
+  "wsPath": "/api/gamepad/ws?role=driver&token=…",        // same, relative
   "metadata": "…"              // the host's session metadata, verbatim;
                                // absent when the host set none
 }
@@ -106,23 +150,71 @@ metadata is free-form text (up to 4 KB) the host attached when creating the sess
 
 Errors come as { "success": false, "error": "…" } with status 400 (invalid request, plus an issues array), 404 (unknown or already used setup code), 409 (session already set up), or 429 (rate limited).
 
+protocolVersion in the request is optional: leave it out and you get whatever this server serves (the response says which). Pin it and a server that speaks something else refuses the setup with 400 and { "error": "Unsupported protocol version", "supported": [1] } — the setup code is not consumed, so you can retry with a version from that list. The same number comes back in every snapshot, so a driver that reconnects without the setup response still knows what it is talking to.
+
+Driver keys — starting without a setup code
+The flow above needs a person in a browser every time: create a session here, read six characters into the game. If your driver runs standalone — a PC client, a native game — its user can issue it a driver key once instead, and it creates its own sessions from then on. The key lives in your game's settings; the flow becomes "click start, show the QR code".
+
+Keys are made on this app's front page under Driver keys (log in, name the key, copy it — it is shown once). Then:
+
+POST https://gamepad.porras.club/api/gamepad/driver/create
+Authorization: Bearer gpk_…
+
+{
+  "config": { ... },        // optional, exactly as above
+  "protocolVersion": 1,     // optional, exactly as above
+  "replaceExisting": false  // default false
+}
+The response is the same as the setup response, and the session behaves identically — it appears in the owner's host panel, and their "End session" ends it. There is no metadata: no host was there to attach any.
+One active session per key. Each key is its own slot, apart from the session its owner hosts on the web and from their other keys. A second create with the same key returns 409 unless you send "replaceExisting": true, which ends that key's previous session first (its players are told the host ended it). That is what a game should send when it starts again after a crash.
+Treat the key like a password: it is stored hashed and shown once, anyone holding it can open sessions in its owner's name, and the owner can revoke it at any time — after which every call gets 401. It is not a login and grants nothing else.
 2. Connect the WebSocket
-Open wss://…{wsPath} on the same host. The first message you receive is always a snapshot — the full session state (state, config, players with name/color/ready/schema). Treat it as the source of truth and apply later events on top; you get a fresh one on every reconnect.
+Open {wsUrl} from the response (or {wsPath} against your own base, if you have one). The first message you receive is always a snapshot — the full session state (protocol version, state, config, players with name/color/ready/schema). Treat it as the source of truth and apply later events on top; you get a fresh one on every reconnect.
 
 Messages you can send: start, pause, resume, end, ping (answered with pong), and message to talk back to players:
 
 { "type": "start" }
 { "type": "message", "payload": { "vibrateMs": 200 } }            // all players
-{ "type": "message", "playerId": "…", "payload": { "hp": 40 } }   // one player
-A payload of { "vibrateMs": n } makes the player's phone vibrate; any other payload is delivered to the player client as-is.
+{ "type": "message", "playerId": "…", "payload": { "text": "You are Red" } }
+{ "type": "message", "playerId": "…", "payload": { "hp": 40 } }   // your own data
+{ "type": "set_schema", "schemaId": "menu" }                      // all players
+{ "type": "set_schema", "playerId": "…", "schemaId": "on-foot" }  // one player
+{ "type": "lobby" }                                               // between rounds
+{ "type": "kick", "playerId": "…" }                               // remove a player
+kick removes a player exactly as if they had left: the name and color go back into the pool, their token dies, everyone gets player_left, and their phone closes with 4011 and a line telling them they were removed. It is not a ban — they can join again with the join code. The host can also do it from their session page.
 
+set_schema puts players on one of your schemas — how a game changes controls by phase (a menu layout, driving, on foot). Omit playerId for everyone. You get a player_updated per player, and players who are briefly offline are included, so a reconnecting phone comes back on the right layout. It is a push, not a lock: a player can still pick a different layout from their in-game menu, and you will see that in player_updated too. Errors: unknown_schema, unknown_player.
+
+The message payload is yours: the server relays it untouched. Two shapes the phone understands, both optional and combinable in one payload:
+
+{ "vibrateMs": n } — buzz the phone (capped at 1 second). A player bridging a real controller feels it in the controller instead, where their hands are.
+{ "text": "You are Red" } — show a line above the controls for a few seconds: who they are, a score, "Press A to respawn". Up to 64 characters (longer is truncated). { "text": null } clears it at once, and it expires on its own if you forget.
+Anything else in the payload is delivered as-is and ignored by the phone — that is what makes it a good place for your own game state.
+
+Background image
+Post an image and every phone shows it behind the controller — the game's art, a map, the screen a raw touchpad mirrors. It is plain HTTP, authenticated with your driver token, and the body is the image itself (PNG, JPEG, GIF or WebP, at most 2 MB; the type is read from the bytes, so the Content-Type you send does not matter):
+
+POST /api/gamepad/driver/background?fit=cover   // fit: cover | contain | fill
+Authorization: Bearer <driverToken>
+<image bytes>
+
+→ { "success": true,
+    "background": { "url": "/api/gamepad/background/…", "fit": "cover" } }
+
+DELETE /api/gamepad/driver/background             // back to no image
+Authorization: Bearer <driverToken>
+One image per session; posting again replaces it (with a new URL) and phones switch at once. It fills the controller box below the header — the same box raw touch coordinates and x / y positions are measured in. cover (default) fills and crops, contain shows it all, fill stretches it to the box, which is the one that keeps image pixels aligned with touch coordinates on every phone.
+It lasts for the session: it survives reconnects and backend restarts, and is deleted when the session ends. Errors: 401 (no or dead token), 400 (bad fit), 413 (too large), 415 (not one of the four formats), 429 (more than 30 uploads a minute).
 3. Session lifecycle
 not_initialized ──driver setup──▶ waiting_for_players ──start──▶ in_progress
-                                                                 │        ▲
-                                                  pause /        ▼        │ resume
-                                                  driver drop   paused ───┘
+                                   ▲                             │        ▲
+                                   │ lobby            pause /    ▼        │ resume
+                                   └───────────────── driver drop paused ─┘
 any active state ──end / host end / driver away 3 min / 24h idle──▶ ended
-Only the driver starts, pauses, resumes and ends the game. Players can join only in waiting_for_players; profile and ready changes are lobby-only (schema switching also works while paused).
+lobby ends a round without ending the session: back to waiting_for_players, with every player's ready cleared (you get a player_updated for each), so the next start waits for a fresh ready-up and players can change name, color and layout in between.
+Only the driver starts, pauses, resumes and ends the game. Players can join only in waiting_for_players — unless you set "allowLateJoin": true, which also admits them while the game runs or is paused. A late joiner lands straight on the controller (ready means nothing to them), and you see the usual player_joined. Turn it on only if your game can cope with a player appearing mid-match; roster sessions ignore it, since the roster is the player set.
+Private: "private": true makes the session invite-only. The join code no longer works; instead the session's owner — and, for a session created with a driver key, the people whose emails are linked to that key on the host page — see it under "Your private sessions" once logged in and join with one tap. joinUrl then points at that page.
+No lobby: "skipLobby": true is for sessions without rounds — a remote control, a jukebox. Your start is accepted with nobody joined or ready, and joining stays open while the game runs (it implies allowLateJoin). Send start as soon as you connect and players never see a lobby. Not allowed together with a roster. Profile and ready changes are lobby-only. Switching the control schema is not: a player may do it in any live state — lobby, in_progress or paused — from the in-game menu, and you learn about it from player_updated.
 "Everyone ready" is information, not a trigger — you decide when to send start (e.g. after your level finished loading). You'll see it via player_updated events.
 If your connection drops during in_progress, the session auto-pauses (state_changed with reason driver_disconnected). Reconnect with your driver token and send resume explicitly.
 The session does not wait for you. Without a driver socket for 3 minutes — after setup, or after a drop — the session is treated as lost and ends for everyone (state_changed to ended with reason driver_lost; the players are sent back to the start page, the host's session info disappears). Your driver token is then dead: set up a new session — quickly, with a roster (next section).
@@ -144,7 +236,9 @@ Losing a session should cost seconds, not a lobby round: remember the players fr
 Players joining a roster session do not type names: the join screen lists the roster and each player taps the one that is theirs. A taken slot cannot be picked twice; name and color are locked in the lobby (update_profile is rejected with profile_locked).
 minPlayers and maxPlayers are the roster size (omit them, or set both to it). start is allowed only once every slot is filled, connected and ready — so "everyone is back" is exactly the moment you can resume the match.
 Roster names must be unique (case-insensitively) and colors unique and from the palette (colors, or the default one). Players get new player ids in the new session — map them back by name.
-Server events to handle: snapshot, state_changed {state, reason}, player_joined/updated/connected/disconnected, player_left (permanent — remove the player; player_disconnected is just a reconnectable drop), error {code, message}, and input (below).
+Server events to handle: snapshot, state_changed {state, reason} (the reason is always there: driver_command, driver_disconnected, driver_lost, host_ended or inactivity), player_joined/updated/connected/disconnected, player_left (permanent — remove the player; player_disconnected is just a reconnectable drop), driver_connected / driver_disconnected (you see your own, too — the events go to everyone), error {code, message}, and input plus motion (below, driver-only).
+
+error.code is a fixed set you can switch on — invalid_state (the action is not allowed in this state), cannot_start (not everyone is joined, connected and ready), profile_taken (that name or color is another player's), profile_locked (roster session: names and colors are fixed), unknown_schema (no schema with that id in your config) and unknown_player (no such player in this session). New codes may be added later, so treat one you do not know as a generic error and show its message.
 
 4. Receiving input
 While in_progress, player input is relayed to you as full controller-state snapshots (not deltas). The example controller near the top of this page generates these live if you want to see them in motion:
@@ -152,9 +246,10 @@ While in_progress, player input is relayed to you as full controller-state snaps
 {
   "type": "input",
   "playerId": "…",
-  "seq": 421,
+  "seq": 1789471234821,   // phone-owned, strictly increasing per player
   "controls": {
     "drive": { "x": 0.4, "y": -1 },   // full joystick: axes in [-1, 1]
+    "look":  { "x": 0.1, "y": 0.6 },  // mode "relative": same shape as full
     "aim":   { "x": -0.2 },           // mode "x"/"y": only that axis
     "hat":   "ur",                    // mode "dpad": one of c,u,ur,r,dr,d,dl,l,ul
     "fire":  true,                    // buttons are booleans
@@ -162,9 +257,22 @@ While in_progress, player input is relayed to you as full controller-state snaps
   }
 }
 Axes are in [-1, 1] with y positive downwards (screen coordinates). Dpad codes are screen directions too; "c" means centered/released (the shared dpadToVector helper maps codes to unit vectors).
-Keep only the highest seq per player and drop stale frames. The server renumbers frames across reconnects so each player's seq is monotonically increasing for the whole session (expect gaps).
-Movement is throttled to ~30 fps on the phone; button presses and dpad direction changes flush immediately as their own frames.
+Keep only the highest seq per player and drop stale frames. seq is owned by the phone: a strictly increasing integer for the lifetime of the player, across reconnects and schema switches (it is seeded from the phone's clock at page load, so expect large numbers and gaps). The server relays it as is and drops non-increasing frames itself.
+Movement is throttled to ~30 fps on the phone; button presses and dpad direction changes flush immediately as their own frames. Analog values are rounded to 3 decimals — finer than a thumb can aim, and half the bytes.
 Server limits: 8 KB per message; players sending >120 input frames/s are dropped frame-wise, >600/s disconnected.
+Joystick modes
+A joystick's mode picks both what it reports and how the phone draws it:
+
+"full" (default) — a round pad reporting {x, y}; the knob springs back to the pad's center on release.
+"relative" — a square pad reporting {x, y} with no fixed center: see below.
+"x" / "y" — a pill track along that axis, reporting only {x} / {y} (a steering wheel, a throttle).
+"dpad" — a square with four arrows reporting one of 9 direction codes, only when the direction changes.
+"relative" is the mode for controls that need accuracy. The point the finger lands on becomes that touch's neutral, and the value is the drag from there (full deflection about a third of the pad's shorter side away, clamped to that circle). Two things follow, and a driver can rely on both:
+
+Every touch starts at zero. Lifting the thumb and putting it back down re-centers rather than snapping to wherever a fixed center was, so a player can reposition mid-game without the aim jumping. Ideal for aiming, cameras and cursors — a walking stick is usually still "full".
+The drag may leave the pad. Only the touch-down has to be inside it; after that the drag keeps steering past the pad's edge (and over other controls) until the finger lifts. Release sends {x: 0, y: 0} like any other stick.
+The values are ordinary axes otherwise — same range, same y-down convention, same ~30 fps throttle — so a driver that already reads a "full" stick needs no new code for a relative pad.
+
 Tilt (gyro) controls
 A { "type": "gyro" } control streams the phone's tilt as a virtual joystick: the same axis shapes as above ({x, y}, or one axis with mode "x"/"y"), riding in the same input frames. x is roll (screen's right edge down = positive), y is pitch (screen's top edge toward the player = positive); yaw is deliberately not part of the protocol (it needs the compass and drifts). range (degrees, default 45) sets how far a player tilts for full deflection.
 
@@ -187,14 +295,75 @@ ax, ay, az: acceleration including gravity, in g, as the reaction force: a phone
 gx, gy, gz: angular rate about the same axes in degrees/second, right-hand rule.
 Axes are the device frame, never the screen's: x points to the right of the screen in portrait, y toward the top edge, z out of the screen toward the player. Declare the hold in your game: the Wii Remote hold is portrait, top edge toward the TV, screen up, so the remote's forward is +y, up is +z, right is +x.
 A stream, not state: there is no seq, nothing is deduplicated, every sample counts. Relayed only while in_progress, like input, and gated like gyro (one per schema; not selectable without a working sensor — keep a fallback schema). Tilt and motion may share a schema.
-5. Reconnection and close codes
+Raw touch
+A { "type": "raw" } control turns the controller box's background into one touch surface reporting every finger and where it is — for games that read touch themselves (gestures, tapping on a mirrored game screen; see "Background image" above). Other controls may sit on top of it: a finger that lands on a button, stick or touchpad belongs to that control until it lifts and is never reported as raw; every other finger is. At most one raw per schema. The value is the list of fingers down, in ordinary input frames:
+
+"controls": {
+  "touch": [                        // [] when no finger is down
+    { "id": 0, "x": 0.412, "y": 0.733 },
+    { "id": 1, "x": 0.871, "y": 0.205 }
+  ]
+}
+x / y: the finger's position in the controller box, 0–1 from its left / top edge (y down), to 3 decimals, in the orientation the controller is held — lock orientation if your mapping depends on it. A finger dragged off the box is clamped to the edge until it lifts.
+id: the finger's slot, 0–9, stable from touch-down to lift-off. A new finger takes the lowest free slot, so ids are reused: a finger that lifts and lands again may get its old id back — the frame sent at the lift, without it, is what tells the two touches apart.
+Touch-downs and lifts are sent at once; movement is sent at up to ~60 fps (schemas with a raw or touchpad control; others ~30 fps).
+Text input
+A { "type": "text" } control is a button that opens a text field with the player's own keyboard (the phone's, or a real one on a laptop) — for answers, names, chat. Nothing is sent while they type; Send (or Enter) delivers the whole text as one message, and the field clears for the next one:
+
+{ "type": "text", "playerId": "…", "controlId": "answer", "text": "Helsinki" }
+It is an event, not controller state: it never appears in input frames, has no seq, and every message is delivered in order (while the game is running).
+Options: label, maxLength (1–1000, default 1000) and the usual button hints (zone, size, x / y, shape).
+The keyboard opens only when the player taps the control — a game cannot pop it up by itself. Show a prompt (for example a { "text": "…" } message) when you want an answer.
+Touchpad
+A { "type": "touchpad" } control is the same surface as one laid-out control among others — a mouse is a touchpad, a "y" scroll slider and two "rect" buttons. Its value is exactly a raw value, with x / y 0–1 inside the pad. The phone computes nothing from the fingers: cursor deltas, taps, two-finger scroll and acceleration are yours. Because positions are absolute, a dropped or merged frame loses a sample of the path, never motion.
+
+aspect: the pad's width / height, 0.25–4 (default 1, a square). The pad is placed like a joystick (zones, size, x / y) and players may move and resize it, but resizing is always uniform — the aspect you declared is the pad's real one, so dx * aspect and dy are motion on the same scale.
+label (optional) is drawn faintly in the middle of the pad.
+Real gamepads (a controller paired with the phone)
+Set "allowPhysicalGamepad": true and the layout picker gains a Real gamepad option: the player pairs a controller with their phone over Bluetooth (or plugs it in) and the phone becomes a bridge, reading it through the browser's Gamepad API. You see the choice as a player_updated whose schemaId is the reserved "physical-gamepad" (your own schemas may not use that id), and the input arrives in ordinary input frames with a fixed control set — the W3C standard gamepad layout, in the value shapes you already handle:
+
+{
+  "type": "input", "playerId": "…", "seq": 1789471234922,
+  "controls": {
+    "left-stick":  { "x": 0.4, "y": -0.9 },  // sticks: like a "full" joystick
+    "right-stick": { "x": 0,   "y": 0 },
+    "dpad": "ur",                            // like a "dpad" joystick
+    "a": true,  "b": false, "x": false, "y": false,   // face buttons
+    "lb": false, "rb": true,                 // bumpers
+    "lt": 0, "rt": 0.75,                     // triggers: analog 0..1 — the one
+                                             // value shape touch never sends
+    "back": false, "start": false,           // "back" = select/view
+    "ls": false, "rs": false,                // stick clicks
+    "home": false
+  }
+}
+Every id is present in every frame (a controller without some button reads it as released). Buttons and dpad changes flush immediately; stick and trigger movement rides the ~30 fps throttle, with a small deadzone so a resting controller sends nothing.
+The phone maps any controller onto this set by the standard indices, so an Xbox, PlayStation or Switch Pro controller all arrive as a/b/x/y in the standard positions (south, east, west, north).
+The option is offered only in browsers with the Gamepad API (iOS Safari and Android Chrome both have it); the phone shows the player what it reads before they ready up. Nothing else changes for you: the player can switch back to a touch layout at any point in a live session, and you see the new id in player_updated.
+5. Keepalive
+The server sends a WebSocket ping frame every 30 seconds and terminates a socket that has not answered the previous one — that is how it notices a client whose network died without closing. Browsers, Node's built-in WebSocket and the ws package answer pings for you; if your library does not, answer them yourself or you will be dropped.
+
+In the other direction, send { "type": "ping" } (answered with pong) every 25 seconds or so while your socket is idle — the phones do. Ping frames are invisible to proxies in between, which drop connections that have carried no data, and a waiting lobby or a paused game can be quiet for a long time. Pings do not count as session activity, so they never keep an abandoned session alive.
+
+6. Reconnection and close codes
 Store the driver token and reconnect with it after any drop — you get a fresh snapshot. Do not reconnect on these close codes:
 
 4000 bad request · 4001 unauthorized · 4004 not found (dead token) · 4005 session ended · 4008 rate limit
 4010 replaced — a newer connection for the same identity took over (also how a player moving to a second device behaves).
+4011 removed — the driver or the host kicked this player. Their credential is dead; joining again needs the join code.
+1009 (standard, not a 4xxx) — a frame over 64 KB; frames over the 8 KB protocol limit are dropped silently instead.
 Anything else is transient: retry with backoff.
+7. Rules to build on
+Protocol version 1 is frozen around these six rules. Follow them and your driver keeps working through every later addition — new message types, new fields, new controls are all additive.
+
+The snapshot is authoritative; events patch it. You get one on every connect. Whether the game is live is reported three ways (driver_connected/driver_disconnected, state_changed.reason, snapshot.driverConnected) — on any doubt, trust the snapshot and rebuild from it.
+Ignore what you do not know. Unknown message types and unknown fields are additions, not errors. Same for control ids you did not declare: a frame from the layout a player just switched away from can still arrive right after the switch.
+Read values by shape, not by id. The same id can be a boolean in one layout and a number in another (lt/rt are analog on real gamepads), and a joystick's shape follows its mode: {x, y}, {x}, {y} or a dpad string.
+Keep only the highest seq per player. It is phone-owned and always increasing for that player — expect big numbers and gaps, never a restart.
+Input arrives only while the game is in progress. Do not act on frames you buffered before a pause: check the state when you apply them, not when they arrived.
+The driver token is a password. It rides in the WebSocket query string, so it lands in access logs; it is scoped to one session and dies with it. Never log it or show it to a player — and treat a driver key (gpk_…), which outlives the session, with more care still.
 Minimal driver (Node.js / browser)
-const BASE = "https://localhost:3000";
+const BASE = "https://gamepad.porras.club";
 
 const res = await fetch(BASE + "/api/gamepad/driver/setup", {
   method: "POST",
@@ -206,7 +375,7 @@ if (!setup.success) throw new Error(setup.error);
 console.log("Players join with:", setup.joinCode, setup.joinUrl);
 
 const latest = new Map(); // playerId -> { seq, controls }
-const ws = new WebSocket(BASE.replace(/^http/, "ws") + setup.wsPath);
+const ws = new WebSocket(setup.wsUrl);  // absolute; no base URL guessing
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
   if (msg.type === "snapshot") {
@@ -221,4 +390,14 @@ ws.onmessage = (event) => {
     }
   }
 };
-The full protocol reference (zod schemas for every message) lives in common/src/apps/gamepad.ts, with design notes in backend/src/apps/gamepad/GAMEPAD.md. Current protocol version: 1 (returned by the setup call).
+With a driver key, the first call needs no setup code at all — the rest of the snippet is unchanged:
+
+const res = await fetch(BASE + "/api/gamepad/driver/create", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + MY_DRIVER_KEY,   // from your settings
+  },
+  body: JSON.stringify({ replaceExisting: true }),  // restart-safe
+});
+The full protocol reference (zod schemas for every message) lives in common/src/apps/gamepad.ts, with design notes in backend/src/apps/gamepad/GAMEPAD.md. Current protocol version: 1 (returned by the setup call and in every snapshot; ask for it explicitly with protocolVersion at setup).
