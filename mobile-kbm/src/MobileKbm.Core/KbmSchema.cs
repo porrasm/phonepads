@@ -17,8 +17,8 @@ public sealed record KeyAction(IReadOnlyList<Key> Keys, bool Repeat = false) : K
 /// <summary>Holds a mouse button for as long as the phone button is held, so drags work.</summary>
 public sealed record MouseButtonAction(MouseButton Button) : KbmAction;
 
-/// <summary>A "y" joystick that scrolls while deflected, faster the further it is pushed.</summary>
-public sealed record ScrollStickAction : KbmAction;
+/// <summary>A scroll strip: a finger dragged along it turns the wheel, the content following the finger.</summary>
+public sealed record ScrollStripAction : KbmAction;
 
 /// <summary>A "dpad" joystick that holds the arrow keys (two at once on a diagonal).</summary>
 public sealed record ArrowPadAction : KbmAction;
@@ -88,6 +88,15 @@ public sealed class KbmSchema
         foreach (var control in Controls.Where(c => c.Dto.Aspect is < 0.25 or > 4))
             problems.Add($"Touchpad '{control.Dto.Id}' in '{Id}' needs an aspect between 0.25 and 4.");
 
+        foreach (var control in Controls.Where(c => c.Dto.X is < 0 or > 100 || c.Dto.Y is < 0 or > 100))
+            problems.Add($"Control '{control.Dto.Id}' in '{Id}' is positioned outside 0–100 %.");
+
+        // The raw background has no position; everything else is placed all together or not at all.
+        var placeable = Controls.Where(c => c.Dto.Type != "raw").ToList();
+        var placed = placeable.Count(c => c.Dto.X is not null && c.Dto.Y is not null);
+        if (placed != 0 && placed != placeable.Count)
+            problems.Add($"'{Id}' positions some controls but not all; the phone expects every control or none.");
+
         return problems;
     }
 
@@ -98,14 +107,17 @@ public sealed class KbmSchema
         && value.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
 }
 
+/// <summary>A control's exact centre, in percent of the controller's width and height from the top-left.</summary>
+public readonly record struct At(double X, double Y);
+
 /// <summary>Declares a schema one control at a time, keeping each control next to what it does.</summary>
 public sealed class SchemaBuilder(string id, string name, string orientation)
 {
     private readonly List<KbmControl> _controls = [];
 
     /// <summary>A laid-out touch surface with a known shape — the pointer when other controls share the screen.</summary>
-    public SchemaBuilder Touchpad(string controlId, double aspect, string? size = null) =>
-        Add(new ControlDto { Type = "touchpad", Id = controlId, Aspect = aspect, Size = size },
+    public SchemaBuilder Touchpad(string controlId, double aspect, string? size = null, At? at = null) =>
+        Add(new ControlDto { Type = "touchpad", Id = controlId, Aspect = aspect, Size = size, X = at?.X, Y = at?.Y },
             new TouchSurfaceAction(aspect));
 
     /// <summary>
@@ -115,23 +127,37 @@ public sealed class SchemaBuilder(string id, string name, string orientation)
     public SchemaBuilder RawSurface(string controlId, double assumedAspect) =>
         Add(new ControlDto { Type = "raw", Id = controlId }, new TouchSurfaceAction(assumedAspect));
 
-    public SchemaBuilder Keys(string controlId, string label, KeyAction action, string? size = null, string? zone = null) =>
-        Add(new ControlDto { Type = "button", Id = controlId, Label = label, Shape = "rect", Size = size, Zone = zone },
+    public SchemaBuilder Keys(string controlId, string label, KeyAction action, string? size = null, string? zone = null, At? at = null) =>
+        Add(new ControlDto { Type = "button", Id = controlId, Label = label, Shape = "rect", Size = size, Zone = zone, X = at?.X, Y = at?.Y },
             action);
 
-    public SchemaBuilder Mouse(string controlId, string label, MouseButton button, string? size = null) =>
-        Add(new ControlDto { Type = "button", Id = controlId, Label = label, Shape = "rect", Size = size },
+    public SchemaBuilder Mouse(string controlId, string label, MouseButton button, string? size = null, At? at = null) =>
+        Add(new ControlDto { Type = "button", Id = controlId, Label = label, Shape = "rect", Size = size, X = at?.X, Y = at?.Y },
             new MouseButtonAction(button));
 
-    public SchemaBuilder ScrollStick(string controlId) =>
-        Add(new ControlDto { Type = "joystick", Id = controlId, Mode = "y" }, new ScrollStickAction());
+    /// <summary>A tall, narrow touchpad that scrolls as a finger is dragged along it.</summary>
+    public SchemaBuilder ScrollStrip(string controlId, At? at = null) =>
+        Add(new ControlDto
+            {
+                Type = "touchpad", Id = controlId, Label = "Scroll", Aspect = ScrollStripAspect, Size = "large",
+                X = at?.X, Y = at?.Y,
+            },
+            new ScrollStripAction());
 
-    public SchemaBuilder ArrowPad(string controlId, string? size = null) =>
-        Add(new ControlDto { Type = "joystick", Id = controlId, Mode = "dpad", Size = size }, new ArrowPadAction());
+    public SchemaBuilder ArrowPad(string controlId, string? size = null, At? at = null) =>
+        Add(new ControlDto { Type = "joystick", Id = controlId, Mode = "dpad", Size = size, X = at?.X, Y = at?.Y },
+            new ArrowPadAction());
 
-    public SchemaBuilder Text(string controlId, string label, string? size = null) =>
-        Add(new ControlDto { Type = "text", Id = controlId, Label = label, Shape = "rect", Size = size, MaxLength = 1000 },
+    public SchemaBuilder Text(string controlId, string label, string? size = null, At? at = null) =>
+        Add(new ControlDto
+            {
+                Type = "text", Id = controlId, Label = label, Shape = "rect", Size = size, MaxLength = 1000,
+                X = at?.X, Y = at?.Y,
+            },
             new TextAction());
+
+    /// <summary>Width / height of a scroll strip: the narrowest the service allows.</summary>
+    internal const double ScrollStripAspect = 0.25;
 
     public KbmSchema Build() => new(id, name, orientation, _controls.ToList());
 

@@ -21,13 +21,17 @@ The tray icon's menu shows where things stand and offers the only settings there
 - **On your phone: gamepad.porras.club** — the hint above. Clicking it opens the site.
 - **Pause / Resume** — while paused, the session stays up but nothing reaches the PC. Double-clicking
   the icon does the same.
-- **Driver key…** — enter a new key. Any current session is replaced.
+- **Settings…** — the driver key (a new one replaces any current session; leave it empty to keep
+  the current one), **Pointer speed** (a slider from 0.25× to 4× for the touchpad), and **Start
+  with Windows** (off by default).
 - **Quit** — ends the session, so the phone is told right away.
 
 Icon colours: green is ready, grey is paused, amber is connecting or retrying, red means it needs a
 key.
 
-To start it with Windows, put a shortcut to `mobile-kbm.exe` in `shell:startup`.
+**Start with Windows** adds Mobile KBM to your user's startup programs (no admin needed); it then
+appears in Task Manager's Startup tab, and disabling it there is respected. The app is portable:
+if you move its folder, the entry follows the next time you run it from the new place.
 
 ## Layouts
 
@@ -36,15 +40,23 @@ resize every control on the phone, and your arrangement is remembered across ses
 
 | Layout | For | Controls |
 |---|---|---|
-| **Mouse** (default) | Everyday use | Touchpad, Left, Right, scroll stick, Type, Enter, ⌫, Esc, Keyboard |
+| **Mouse** (default) | Everyday use | The whole background is the touchpad; Left and Right along the bottom, a scroll strip down the right edge, and Type, Enter, ⌫, Esc, All keys along the top |
 | **Touchpad only** | Maximum pointing area | The whole screen is a touchpad |
-| **Browser** | Browsing from the sofa | Touchpad, Left, scroll, Type, Enter, Back, Forward, Address (Ctrl+L), New tab, Close tab, Next tab, Reload, Esc, Right |
-| **Keys** | Navigating without a pointer | Arrow pad, Enter, Esc, Tab, ⌫, Del, Space, Type, Alt+Tab, Start, Copy, Paste, Undo, Desktop (Win+D), Close window (Alt+F4), Keyboard |
-| **Media** | A PC on the TV | Play/Pause, seek ◀▶, Vol −/+, Mute, Full screen (F), Prev/Next track, Esc, small touchpad, Click |
+| **Browser** | Browsing from the sofa | Like Mouse, with Back, Fwd, Next tab, Close tab, URL (Ctrl+L), Type and Enter along the top |
+| **Keys** | Navigating without a pointer | A big arrow pad, Enter, Esc, ⌫, Del, Tab, Space, Type, All keys |
+| **Shortcuts** | The everyday Windows shortcuts | Copy, Paste, Cut, Undo, Redo, Select all, Alt+Tab, Start, Desktop (Win+D), Close window (Alt+F4), Save, All keys |
+| **Media** | A PC on the TV | Prev, Play/Pause, Next, seek « », Full screen (F), Vol −/+, Mute, Esc, Click; the background is a touchpad |
 | **Slides** | Presenting | Next/Previous (Page Down/Up, like a clicker), Start show (F5), Black screen (B), End show (Esc) |
 
 **Type** opens the phone's keyboard. The text is typed on the PC when you press Send, exactly as
 written, whatever the PC's keyboard layout. It does not press Enter afterwards; use the Enter button.
+**All keys** opens Windows' own on-screen keyboard, for anything the layouts leave out.
+
+Each layout places its controls itself rather than leaving it to the phone. The phone's automatic
+layout fills from the right thumb outwards (which put Left on the right) and never makes a pointer
+area bigger than one box. One thing only the phone decides is button size: it shrinks every button
+as their number grows, and asking for "large" does not override that. That is why Keys and Shortcuts
+are separate layouts, and why Browser keeps to seven keys.
 
 ### Touchpad gestures
 
@@ -57,20 +69,24 @@ written, whatever the PC's keyboard layout. It does not press Enter afterwards; 
 | Two-finger tap | Right click |
 | Three-finger tap | Middle click |
 
-The buttons are real mouse buttons: hold **Left** and slide on the touchpad to drag. The scroll stick
-scrolls faster the further you push it. Held keys such as ⌫, the arrows and Vol ± auto-repeat like
-a real keyboard. The repeat stops after 6 seconds, so a phone that vanishes mid-press cannot delete a
-whole document.
+The buttons are real mouse buttons: hold **Left** and slide on the touchpad to drag. The **scroll
+strip** scrolls as you drag a finger along it, the content following your finger; a full-length drag
+is about ten notches of the wheel. Held keys such as ⌫, the arrows and Vol ± auto-repeat like a real
+keyboard. The repeat stops after 6 seconds, so a phone that vanishes mid-press cannot delete a whole
+document.
 
 ### Touchpad vs raw touch
 
 The protocol offers two ways to read fingers: a laid-out **touchpad** control, and **raw**, which
 turns the background behind the other controls into a touch surface. Both report absolute finger
-positions, so the gestures are the same code either way. The difference is shape. A touchpad declares
-its aspect ratio, so the pointer moves at the same speed across and down. Raw reports 0–1 of a box
-whose proportions the app is never told. So layouts that mix controls use a touchpad. The
-touchpad-only layout uses raw to get the whole screen, and assumes a typical portrait phone's
-proportions (`KbmSchemas.PortraitBoxAspect`), which is at worst a little off on one axis.
+positions, so the gestures are the same code either way. A finger that lands on a button belongs to
+the button, so raw works as a touchpad around and between the other controls.
+
+The difference is shape. A touchpad declares its aspect ratio, so its motion is the same speed
+across and down. Raw reports 0–1 of a box whose proportions the app is never told, so it assumes a
+typical portrait phone's (`KbmSchemas.PortraitBoxAspect`), which is at worst a little off on one axis.
+The layouts use raw anyway: a pointer area as big as the screen is worth far more. The scroll strip
+is a touchpad, the narrowest the protocol allows (aspect 0.25).
 
 ## How it stays connected
 

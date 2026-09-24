@@ -22,6 +22,13 @@ internal sealed class WindowsInputSink : IInputSink
     private const uint MouseMiddleUp = 0x0040;
     private const uint MouseWheel = 0x0800;
     private const uint MouseHWheel = 0x1000;
+    private const uint MouseVirtualDesk = 0x4000;
+    private const uint MouseAbsolute = 0x8000;
+
+    private const int SmXVirtualScreen = 76;
+    private const int SmYVirtualScreen = 77;
+    private const int SmCxVirtualScreen = 78;
+    private const int SmCyVirtualScreen = 79;
 
     private const uint KeyExtended = 0x0001;
     private const uint KeyUp = 0x0002;
@@ -31,7 +38,32 @@ internal sealed class WindowsInputSink : IInputSink
 
     public int ScreenHeight => Screen.PrimaryScreen?.Bounds.Height ?? 1080;
 
-    public void MoveMouse(int dx, int dy) => Send(Mouse(dx, dy, 0, MouseMove));
+    /// <summary>
+    /// Moves the pointer by exactly this many pixels. A relative SendInput move would go
+    /// through Windows' pointer speed and "Enhance pointer precision" curve on top of the
+    /// touchpad's own acceleration, so the pointer is placed absolutely instead.
+    /// </summary>
+    public void MoveMouse(int dx, int dy)
+    {
+        if (!GetCursorPos(out var at))
+        {
+            // No cursor to read (a secure desktop): a relative move is the best there is.
+            Send(Mouse(dx, dy, 0, MouseMove));
+            return;
+        }
+
+        var left = GetSystemMetrics(SmXVirtualScreen);
+        var top = GetSystemMetrics(SmYVirtualScreen);
+        var width = Math.Max(GetSystemMetrics(SmCxVirtualScreen), 2);
+        var height = Math.Max(GetSystemMetrics(SmCyVirtualScreen), 2);
+
+        var x = Math.Clamp(at.X + dx, left, left + width - 1);
+        var y = Math.Clamp(at.Y + dy, top, top + height - 1);
+        Send(Mouse(Normalize(x - left, width), Normalize(y - top, height), 0, MouseMove | MouseAbsolute | MouseVirtualDesk));
+    }
+
+    /// <summary>Pixel offset to the 0–65535 range absolute input uses, landing on that pixel's centre.</summary>
+    private static int Normalize(int offset, int size) => (int)(((offset * 65536L) + 32768) / size);
 
     public void SetMouseButton(MouseButton button, bool down)
     {
@@ -130,8 +162,22 @@ internal sealed class WindowsInputSink : IInputSink
     [DllImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
     private static extern uint MapVirtualKey(uint uCode, uint uMapType);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
     // Field names follow the Win32 headers.
 #pragma warning disable IDE1006
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
     {

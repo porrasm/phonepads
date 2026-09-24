@@ -6,7 +6,7 @@ using Phonepads.Protocol;
 
 namespace MobileKbm.App;
 
-/// <summary>Everything the app remembers: where the service is, the driver key, and whether it is paused.</summary>
+/// <summary>Everything the app remembers: where the service is, the driver key, pointer speed, and whether it is paused.</summary>
 internal sealed class KbmSettings
 {
     [JsonPropertyName("baseUrl")] public string BaseUrl { get; set; } = DriverClient.DefaultBaseUrl;
@@ -18,6 +18,9 @@ internal sealed class KbmSettings
     [JsonPropertyName("driverKey")] public string? ProtectedDriverKey { get; set; }
 
     [JsonPropertyName("paused")] public bool Paused { get; set; }
+
+    /// <summary>Touchpad pointer speed multiplier; 1 is the default.</summary>
+    [JsonPropertyName("pointerSpeed")] public double PointerSpeed { get; set; } = 1;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

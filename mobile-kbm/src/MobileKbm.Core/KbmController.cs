@@ -23,11 +23,6 @@ public sealed class KbmController
     /// </summary>
     internal const double RepeatCutoffMs = 6000;
 
-    /// <summary>Wheel units per second at full scroll-stick deflection (120 is one notch).</summary>
-    internal const double StickWheelPerSecond = 2400;
-
-    internal const double StickDeadzone = 0.12;
-
     private readonly HeldInput _held;
     private readonly IReadOnlyDictionary<string, KbmSchema> _schemas;
     private readonly KbmSchema _default;
@@ -35,7 +30,6 @@ public sealed class KbmController
     private readonly long _epoch;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, PlayerInput> _players = new(StringComparer.Ordinal);
-    private double _lastTick = double.NaN;
     private bool _paused;
 
     public KbmController(IInputSink sink, IReadOnlyList<KbmSchema> schemas, TimeProvider? time = null)
@@ -64,6 +58,23 @@ public sealed class KbmController
                 _paused = value;
                 if (value) ReleaseEverything();
             }
+        }
+    }
+
+    /// <summary>Slowest and fastest <see cref="PointerSpeed"/> the settings offer.</summary>
+    public const double MinPointerSpeed = 0.25;
+    public const double MaxPointerSpeed = 4;
+
+    /// <summary>Multiplies touchpad pointer motion: 1 is the default feel. Scrolling is unaffected.</summary>
+    public double PointerSpeed
+    {
+        get
+        {
+            lock (_gate) return _held.PointerSpeed;
+        }
+        set
+        {
+            lock (_gate) _held.PointerSpeed = Math.Clamp(double.IsFinite(value) ? value : 1, MinPointerSpeed, MaxPointerSpeed);
         }
     }
 
@@ -126,8 +137,8 @@ public sealed class KbmController
                         player.SetHeld(_held, controlId, action, value.Pressed, now);
                         break;
 
-                    case ScrollStickAction when value.Kind == ControlValueKind.Axes:
-                        player.Scroll = value.Y;
+                    case ScrollStripAction when value.Kind == ControlValueKind.Touches:
+                        player.Strip(controlId, _held).Update(value.Touches);
                         break;
 
                     case ArrowPadAction when value.Kind == ControlValueKind.Dpad:
@@ -157,11 +168,9 @@ public sealed class KbmController
     {
         lock (_gate)
         {
-            var elapsed = double.IsNaN(_lastTick) ? 0 : Math.Clamp(now - _lastTick, 0, 100);
-            _lastTick = now;
             if (_paused) return;
 
-            foreach (var player in _players.Values) player.Tick(_held, now, elapsed);
+            foreach (var player in _players.Values) player.Tick(_held, now);
         }
     }
 
@@ -216,14 +225,11 @@ public sealed class KbmController
 
         private readonly Dictionary<string, Held> _holding = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TouchpadGestures> _surfaces = new(StringComparer.Ordinal);
-        private double _wheelRest;
+        private readonly Dictionary<string, ScrollStrip> _strips = new(StringComparer.Ordinal);
 
         public KbmSchema Schema { get; set; } = schema;
 
         public long LastSeq { get; set; } = long.MinValue;
-
-        /// <summary>Scroll-stick deflection, y down; the tick turns it into wheel movement.</summary>
-        public double Scroll { get; set; }
 
         public void SetHeld(HeldInput output, string key, KbmAction action, bool pressed, double now)
         {
@@ -277,7 +283,18 @@ public sealed class KbmController
             return surface;
         }
 
-        public void Tick(HeldInput output, double now, double elapsedMs)
+        public ScrollStrip Strip(string controlId, HeldInput output)
+        {
+            if (!_strips.TryGetValue(controlId, out var strip))
+            {
+                strip = new ScrollStrip(output);
+                _strips[controlId] = strip;
+            }
+
+            return strip;
+        }
+
+        public void Tick(HeldInput output, double now)
         {
             foreach (var held in _holding.Values)
             {
@@ -288,23 +305,6 @@ public sealed class KbmController
             }
 
             foreach (var surface in _surfaces.Values) surface.Tick(now);
-
-            var magnitude = Math.Abs(Scroll);
-            if (magnitude < StickDeadzone)
-            {
-                _wheelRest = 0;
-                return;
-            }
-
-            var strength = (magnitude - StickDeadzone) / (1 - StickDeadzone);
-            // Pushing up (negative y) scrolls up (positive wheel). Squared: fine control near the centre.
-            _wheelRest += -Math.Sign(Scroll) * strength * strength * StickWheelPerSecond * elapsedMs / 1000;
-            var chunks = (int)(_wheelRest / TouchpadGestures.WheelChunk);
-            if (chunks == 0) return;
-
-            var delta = chunks * TouchpadGestures.WheelChunk;
-            _wheelRest -= delta;
-            output.Sink.Wheel(delta, horizontal: false);
         }
 
         public void Release(HeldInput output)
@@ -312,8 +312,7 @@ public sealed class KbmController
             foreach (var key in _holding.Keys.ToList()) Let(output, key);
             foreach (var surface in _surfaces.Values) surface.Reset();
             _surfaces.Clear();
-            Scroll = 0;
-            _wheelRest = 0;
+            _strips.Clear();
         }
 
         private void Let(HeldInput output, string key)

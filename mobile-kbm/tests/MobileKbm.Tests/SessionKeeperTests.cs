@@ -95,6 +95,61 @@ public sealed class SessionKeeperTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_short_drop_late_in_a_session_reconnects_to_the_same_session()
+    {
+        await WithWatchdog(lostAfterMs: 300, async () =>
+        {
+            _keeper.SetDriverKey("gpk_test");
+            Run();
+
+            var connection = await _api.NextConnectionAsync();
+            connection.RaiseSnapshot("in_progress", Phone("a"));
+
+            // Up for longer than LostAfter, then a brief blip.
+            await Task.Delay(500);
+            connection.RaiseStatus(ConnectionStatus.Reconnecting);
+            await Task.Delay(150);
+            connection.RaiseStatus(ConnectionStatus.Connected);
+            await Task.Delay(300);
+
+            Assert.Single(_api.KeysUsed);
+            Assert.Equal(KeeperStatus.Online, _keeper.State.Status);
+        });
+    }
+
+    [Fact]
+    public async Task A_drop_longer_than_the_service_waits_makes_a_new_session()
+    {
+        await WithWatchdog(lostAfterMs: 300, async () =>
+        {
+            _keeper.SetDriverKey("gpk_test");
+            Run();
+
+            var first = await _api.NextConnectionAsync();
+            first.RaiseSnapshot("in_progress", Phone("a"));
+            first.RaiseStatus(ConnectionStatus.Reconnecting);
+
+            await _api.NextConnectionAsync();
+            Assert.Equal(2, _api.KeysUsed.Count);
+        });
+    }
+
+    private static async Task WithWatchdog(int lostAfterMs, Func<Task> test)
+    {
+        var (lostAfter, interval) = (SessionKeeper.LostAfter, SessionKeeper.WatchdogInterval);
+        SessionKeeper.LostAfter = TimeSpan.FromMilliseconds(lostAfterMs);
+        SessionKeeper.WatchdogInterval = TimeSpan.FromMilliseconds(25);
+        try
+        {
+            await test();
+        }
+        finally
+        {
+            (SessionKeeper.LostAfter, SessionKeeper.WatchdogInterval) = (lostAfter, interval);
+        }
+    }
+
+    [Fact]
     public async Task Makes_a_new_session_when_the_token_dies()
     {
         _keeper.SetDriverKey("gpk_test");

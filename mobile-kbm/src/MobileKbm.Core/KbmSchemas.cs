@@ -29,21 +29,25 @@ public static class KbmSchemas
     /// <summary>Win+Ctrl+O toggles Windows' On-Screen Keyboard — the escape hatch for everything else.</summary>
     private static readonly KeyAction OnScreenKeyboard = Chord(Key.Win, Key.Ctrl, Key.O);
 
+    // Every layout places its controls itself (x / y, in percent of the portrait screen). Left
+    // to the phone, the layout engine fills from the right thumb outwards, which puts a "Left"
+    // button on the right, and it never makes the pointer area bigger than one box.
+
     /// <summary>
-    /// Pointer, both buttons, a scroll stick, a line of text and the keys that follow typing.
-    /// The touchpad is a laid-out control rather than the raw background because its aspect
-    /// is declared, so pointer speed is the same in both directions whatever the phone.
+    /// The everyday layout: the whole background is the touchpad, the mouse buttons sit along
+    /// the bottom where the thumb is, a scroll strip runs down the right edge, and the typing
+    /// keys line the top.
     /// </summary>
     public static KbmSchema Mouse { get; } = new SchemaBuilder("mouse", "Mouse", "portrait")
-        .Touchpad("pad", aspect: 1.2, size: "large")
-        .Mouse("left", "Left", MouseButton.Left)
-        .Mouse("right", "Right", MouseButton.Right)
-        .ScrollStick("scroll")
-        .Text("type", "Type")
-        .Keys("enter", "Enter", Chord(Key.Enter))
-        .Keys("backspace", "⌫", Repeating(Key.Backspace))
-        .Keys("esc", "Esc", Chord(Key.Escape))
-        .Keys("keyboard", "Keyboard", OnScreenKeyboard, zone: "aux")
+        .RawSurface("surface", PortraitBoxAspect)
+        .Mouse("left", "Left", MouseButton.Left, size: "large", at: new(22, 91))
+        .Mouse("right", "Right", MouseButton.Right, size: "large", at: new(64, 91))
+        .ScrollStrip("scroll", at: new(91, 55))
+        .Text("type", "Type", at: new(10, 6))
+        .Keys("enter", "Enter", Chord(Key.Enter), at: new(30, 6))
+        .Keys("backspace", "⌫", Repeating(Key.Backspace), at: new(50, 6))
+        .Keys("esc", "Esc", Chord(Key.Escape), at: new(70, 6))
+        .Keys("keyboard", "All keys", OnScreenKeyboard, at: new(90, 6))
         .Build();
 
     /// <summary>
@@ -54,62 +58,71 @@ public static class KbmSchemas
         .RawSurface("surface", PortraitBoxAspect)
         .Build();
 
-    /// <summary>Browsing from the sofa: address bar, tabs, back and forward, plus the pointer.</summary>
+    /// <summary>
+    /// Browsing from the sofa: the Mouse layout with back, forward, tabs and the address bar along
+    /// the top. Kept to what fits: the phone shrinks every button as their number grows.
+    /// </summary>
     public static KbmSchema Browser { get; } = new SchemaBuilder("browser", "Browser", "portrait")
-        .Touchpad("pad", aspect: 1.2, size: "large")
-        .Mouse("left", "Left", MouseButton.Left)
-        .ScrollStick("scroll")
-        .Text("type", "Type")
-        .Keys("enter", "Enter", Chord(Key.Enter))
-        .Keys("back", "◀ Back", Chord(Key.BrowserBack))
-        .Keys("forward", "Fwd ▶", Chord(Key.BrowserForward))
-        .Keys("address", "Address", Chord(Key.Ctrl, Key.L))
-        .Keys("new-tab", "New tab", Chord(Key.Ctrl, Key.T))
-        .Keys("close-tab", "Close tab", Chord(Key.Ctrl, Key.W))
-        .Keys("next-tab", "Next tab", Chord(Key.Ctrl, Key.Tab))
-        .Keys("reload", "Reload", Chord(Key.F5))
-        .Keys("esc", "Esc", Chord(Key.Escape))
-        .Mouse("right", "Right", MouseButton.Right)
+        .RawSurface("surface", PortraitBoxAspect)
+        .Mouse("left", "Left", MouseButton.Left, size: "large", at: new(22, 91))
+        .Mouse("right", "Right", MouseButton.Right, size: "large", at: new(64, 91))
+        .ScrollStrip("scroll", at: new(91, 58))
+        .Keys("back", "Back", Chord(Key.BrowserBack), at: new(13, 6))
+        .Keys("forward", "Fwd", Chord(Key.BrowserForward), at: new(38, 6))
+        .Keys("next-tab", "Next tab", Chord(Key.Ctrl, Key.Tab), at: new(63, 6))
+        .Keys("close-tab", "Close tab", Chord(Key.Ctrl, Key.W), at: new(88, 6))
+        .Keys("address", "URL", Chord(Key.Ctrl, Key.L), at: new(20, 19))
+        .Text("type", "Type", at: new(50, 19))
+        .Keys("enter", "Enter", Chord(Key.Enter), at: new(80, 19))
         .Build();
 
-    /// <summary>Navigation and editing keys and the everyday Windows shortcuts — no pointer.</summary>
+    /// <summary>Arrows and the editing keys, big enough to hit without looking.</summary>
     public static KbmSchema Keys { get; } = new SchemaBuilder("keys", "Keys", "portrait")
-        .ArrowPad("arrows", size: "large")
-        .Keys("enter", "Enter", Chord(Key.Enter))
-        .Keys("esc", "Esc", Chord(Key.Escape))
-        .Keys("tab", "Tab", Repeating(Key.Tab))
-        .Keys("backspace", "⌫", Repeating(Key.Backspace))
-        .Keys("delete", "Del", Repeating(Key.Delete))
-        .Keys("space", "Space", Chord(Key.Space))
-        .Text("type", "Type")
-        .Keys("alt-tab", "Alt+Tab", Chord(Key.Alt, Key.Tab))
-        .Keys("start", "Start", Chord(Key.Win))
-        .Keys("copy", "Copy", Chord(Key.Ctrl, Key.C))
-        .Keys("paste", "Paste", Chord(Key.Ctrl, Key.V))
-        .Keys("undo", "Undo", Chord(Key.Ctrl, Key.Z))
-        .Keys("desktop", "Desktop", Chord(Key.Win, Key.D))
-        .Keys("close-window", "Close window", Chord(Key.Alt, Key.F4))
-        .Keys("keyboard", "Keyboard", OnScreenKeyboard, zone: "aux")
+        .ArrowPad("arrows", size: "large", at: new(50, 28))
+        .Keys("enter", "Enter", Chord(Key.Enter), size: "large", at: new(14, 64))
+        .Keys("esc", "Esc", Chord(Key.Escape), size: "large", at: new(38, 64))
+        .Keys("backspace", "⌫", Repeating(Key.Backspace), size: "large", at: new(62, 64))
+        .Keys("delete", "Del", Repeating(Key.Delete), size: "large", at: new(86, 64))
+        .Keys("tab", "Tab", Repeating(Key.Tab), size: "large", at: new(14, 86))
+        .Keys("space", "Space", Chord(Key.Space), size: "large", at: new(38, 86))
+        .Text("type", "Type", size: "large", at: new(62, 86))
+        .Keys("keyboard", "All keys", OnScreenKeyboard, size: "large", at: new(86, 86))
+        .Build();
+
+    /// <summary>The everyday Windows shortcuts. Apart from Keys because the phone shrinks buttons as their number grows.</summary>
+    public static KbmSchema Shortcuts { get; } = new SchemaBuilder("shortcuts", "Shortcuts", "portrait")
+        .Keys("copy", "Copy", Chord(Key.Ctrl, Key.C), size: "large", at: new(20, 14))
+        .Keys("paste", "Paste", Chord(Key.Ctrl, Key.V), size: "large", at: new(50, 14))
+        .Keys("cut", "Cut", Chord(Key.Ctrl, Key.X), size: "large", at: new(80, 14))
+        .Keys("undo", "Undo", Chord(Key.Ctrl, Key.Z), size: "large", at: new(20, 38))
+        .Keys("redo", "Redo", Chord(Key.Ctrl, Key.Y), size: "large", at: new(50, 38))
+        .Keys("select-all", "Select all", Chord(Key.Ctrl, Key.A), size: "large", at: new(80, 38))
+        .Keys("alt-tab", "Alt+Tab", Chord(Key.Alt, Key.Tab), size: "large", at: new(20, 62))
+        .Keys("start", "Start", Chord(Key.Win), size: "large", at: new(50, 62))
+        .Keys("desktop", "Desktop", Chord(Key.Win, Key.D), size: "large", at: new(80, 62))
+        .Keys("close-window", "Close window", Chord(Key.Alt, Key.F4), size: "large", at: new(20, 86))
+        .Keys("save", "Save", Chord(Key.Ctrl, Key.S), size: "large", at: new(50, 86))
+        .Keys("keyboard", "All keys", OnScreenKeyboard, size: "large", at: new(80, 86))
         .Build();
 
     /// <summary>
     /// A media remote for a PC on the TV. The media keys work in any player that listens to
     /// them (browsers included); the arrows seek and F toggles full screen in YouTube, Netflix,
-    /// VLC and most web players.
+    /// VLC and most web players. The background is a touchpad for clicking around a web player.
     /// </summary>
     public static KbmSchema Media { get; } = new SchemaBuilder("media", "Media", "portrait")
-        .Keys("play-pause", "Play / Pause", Chord(Key.MediaPlayPause), size: "large")
-        .Keys("seek-back", "« Seek", Repeating(Key.Left))
-        .Keys("seek-forward", "Seek »", Repeating(Key.Right))
-        .Keys("volume-down", "Vol −", Repeating(Key.VolumeDown))
-        .Keys("volume-up", "Vol +", Repeating(Key.VolumeUp))
-        .Keys("mute", "Mute", Chord(Key.VolumeMute))
-        .Keys("fullscreen", "Full screen", Chord(Key.F))
-        .Keys("previous", "⏮ Prev", Chord(Key.MediaPrevious))
-        .Keys("next", "Next ⏭", Chord(Key.MediaNext))
-        .Keys("esc", "Esc", Chord(Key.Escape))
-        .Touchpad("pad", aspect: 1.5)
-        .Mouse("click", "Click", MouseButton.Left)
+        .RawSurface("surface", PortraitBoxAspect)
+        .Keys("play-pause", "Play / Pause", Chord(Key.MediaPlayPause), size: "large", at: new(50, 12))
+        .Keys("previous", "Prev", Chord(Key.MediaPrevious), at: new(18, 12))
+        .Keys("next", "Next", Chord(Key.MediaNext), at: new(82, 12))
+        .Keys("seek-back", "« Seek", Repeating(Key.Left), at: new(18, 32))
+        .Keys("fullscreen", "Full screen", Chord(Key.F), at: new(50, 32))
+        .Keys("seek-forward", "Seek »", Repeating(Key.Right), at: new(82, 32))
+        .Keys("volume-down", "Vol −", Repeating(Key.VolumeDown), at: new(18, 52))
+        .Keys("mute", "Mute", Chord(Key.VolumeMute), at: new(50, 52))
+        .Keys("volume-up", "Vol +", Repeating(Key.VolumeUp), at: new(82, 52))
+        .Keys("esc", "Esc", Chord(Key.Escape), at: new(18, 91))
+        .Mouse("click", "Click", MouseButton.Left, size: "large", at: new(70, 91))
         .Build();
 
     /// <summary>
@@ -117,15 +130,15 @@ public static class KbmSchemas
     /// slide program and PDF viewer understands them.
     /// </summary>
     public static KbmSchema Slides { get; } = new SchemaBuilder("slides", "Slides", "portrait")
-        .Keys("next", "Next ▶", Chord(Key.PageDown), size: "large")
-        .Keys("previous", "◀ Previous", Chord(Key.PageUp))
-        .Keys("start", "Start show (F5)", Chord(Key.F5))
-        .Keys("black", "Black screen", Chord(Key.B))
-        .Keys("end", "End show", Chord(Key.Escape))
+        .Keys("next", "Next", Chord(Key.PageDown), size: "large", at: new(50, 30))
+        .Keys("previous", "Previous", Chord(Key.PageUp), size: "large", at: new(50, 62))
+        .Keys("start", "Start show (F5)", Chord(Key.F5), at: new(18, 90))
+        .Keys("black", "Black screen", Chord(Key.B), at: new(50, 90))
+        .Keys("end", "End show", Chord(Key.Escape), at: new(82, 90))
         .Build();
 
     /// <summary>Every layout, the default first.</summary>
-    public static IReadOnlyList<KbmSchema> All { get; } = [Mouse, Touchpad, Browser, Keys, Media, Slides];
+    public static IReadOnlyList<KbmSchema> All { get; } = [Mouse, Touchpad, Browser, Keys, Shortcuts, Media, Slides];
 
     /// <summary>
     /// The session every run asks for. Always private — this is a remote control for a PC, so

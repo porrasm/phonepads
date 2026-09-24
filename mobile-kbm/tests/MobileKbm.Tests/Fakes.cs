@@ -92,6 +92,13 @@ public sealed class FakeConnection(Action<FakeConnection> onRunning) : ISessionC
 
     public void RaiseStopped(string reason) => Stopped?.Invoke(reason);
 
+    /// <summary>The socket dropping (Reconnecting) or coming back (Connected), as the real connection reports it.</summary>
+    public void RaiseStatus(ConnectionStatus status)
+    {
+        Status = status;
+        StatusChanged?.Invoke(status);
+    }
+
     // Unused by the keeper, declared for the interface.
     public void Unused()
     {

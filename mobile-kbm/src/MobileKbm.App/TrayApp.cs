@@ -6,7 +6,7 @@ namespace MobileKbm.App;
 /// <summary>
 /// The whole app: a tray icon and its menu. No window of its own — the session keeper runs
 /// in the background and the menu only shows its state and offers the few things a user
-/// changes: the driver key, pause, quit.
+/// changes: the driver key, pointer speed, starting with Windows, pause, quit.
 /// </summary>
 internal sealed class TrayApp : ApplicationContext
 {
@@ -30,13 +30,14 @@ internal sealed class TrayApp : ApplicationContext
     {
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settings = SettingsStore.Load();
+        Startup.Refresh();
 
         var baseUri = Uri.TryCreate(_settings.BaseUrl, UriKind.Absolute, out var configured)
             ? configured
             : new Uri(DriverClient.DefaultBaseUrl);
         var client = new DriverClient(new HttpClient { Timeout = TimeSpan.FromSeconds(20) }, baseUri);
 
-        _controller = new KbmController(new WindowsInputSink(), KbmSchemas.All);
+        _controller = new KbmController(new WindowsInputSink(), KbmSchemas.All) { PointerSpeed = _settings.PointerSpeed };
         _keeper = new SessionKeeper(
             new ServiceDriverApi(client),
             _controller,
@@ -50,13 +51,13 @@ internal sealed class TrayApp : ApplicationContext
             ToolTipText = "Log in with the account that owns the driver key; the session is listed there.",
         };
         _pause = new ToolStripMenuItem("Pause", null, (_, _) => TogglePause());
-        var key = new ToolStripMenuItem("Driver key…", null, (_, _) => AskForKey());
+        var settings = new ToolStripMenuItem("Settings…", null, (_, _) => OpenSettings());
         var quit = new ToolStripMenuItem("Quit", null, (_, _) => Quit());
 
         var menu = new ContextMenuStrip();
         menu.Items.AddRange(new ToolStripItem[]
         {
-            _status, hint, new ToolStripSeparator(), _pause, key, new ToolStripSeparator(), quit,
+            _status, hint, new ToolStripSeparator(), _pause, settings, new ToolStripSeparator(), quit,
         });
 
         _tray = new NotifyIcon
@@ -78,7 +79,7 @@ internal sealed class TrayApp : ApplicationContext
         _ticking = _controller.RunTickerAsync(_cts.Token);
 
         // First run: nothing works without a key, so ask straight away.
-        if (_settings.ProtectedDriverKey is null) _ui.Post(_ => AskForKey(), null);
+        if (_settings.ProtectedDriverKey is null) _ui.Post(_ => OpenSettings(), null);
     }
 
     private void Show(KeeperState state)
@@ -126,18 +127,31 @@ internal sealed class TrayApp : ApplicationContext
         _keeper.SetPaused(_settings.Paused);
     }
 
-    private void AskForKey()
+    private void OpenSettings()
     {
         if (FocusOpenDialog()) return;
 
-        using var form = new DriverKeyForm(_settings.BaseUrl, hasKey: _settings.ProtectedDriverKey is not null);
+        // A key saved by another Windows user or PC does not decrypt here, so it does not count.
+        var hasKey = SettingsStore.ReadKey(_settings) is not null;
+        var startsWithWindows = Startup.IsEnabled;
+        using var form = new SettingsForm(_settings.BaseUrl, hasKey, _settings.PointerSpeed, startsWithWindows);
         _openDialog = form;
         try
         {
             if (form.ShowDialog() != DialogResult.OK) return;
-            SettingsStore.WriteKey(_settings, form.DriverKey);
+
+            _settings.PointerSpeed = form.PointerSpeed;
+            _controller.PointerSpeed = form.PointerSpeed;
+            // An empty box keeps the current key, and the running session with it.
+            if (form.DriverKey is { } key) SettingsStore.WriteKey(_settings, key);
             SettingsStore.Save(_settings);
-            _keeper.SetDriverKey(form.DriverKey);
+            if (form.DriverKey is not null) _keeper.SetDriverKey(form.DriverKey);
+
+            if (form.StartWithWindows != startsWithWindows && !Startup.Set(form.StartWithWindows))
+            {
+                _tray.ShowBalloonTip(
+                    5000, "Mobile KBM", "Windows did not allow changing the startup setting.", ToolTipIcon.Warning);
+            }
         }
         finally
         {

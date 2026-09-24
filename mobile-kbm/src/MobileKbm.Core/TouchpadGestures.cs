@@ -233,7 +233,7 @@ internal sealed class TouchpadGestures(double aspect, HeldInput output)
         // Frames come at up to ~60 fps; guard against bursts arriving back to back.
         var speed = distance / (Math.Max(dtMs, 8) / 1000); // surface heights per second
         var boost = Math.Clamp((speed - 0.25) / 2.0, 0, 1);
-        var gain = output.Sink.ScreenHeight * PointerScreens * (1 + PointerAcceleration * boost);
+        var gain = output.Sink.ScreenHeight * PointerScreens * output.PointerSpeed * (1 + PointerAcceleration * boost);
 
         _pointerRestX += dx * gain;
         _pointerRestY += dy * gain;

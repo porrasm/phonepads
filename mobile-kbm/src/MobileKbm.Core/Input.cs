@@ -87,6 +87,9 @@ internal sealed class HeldInput(IInputSink sink)
 
     public IInputSink Sink { get; } = sink;
 
+    /// <summary>Pointer motion multiplier, set by the controller from the user's settings.</summary>
+    public double PointerSpeed { get; set; } = 1;
+
     public void Press(Key key)
     {
         var count = _keys.GetValueOrDefault(key);

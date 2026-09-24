@@ -43,12 +43,12 @@ public class ControllerTests
         _kbm.SetPlayer("p", "browser", connected: true);
 
         Press(0, "address", true);
-        Press(10, "new-tab", true);
+        Press(10, "next-tab", true);
         Press(20, "address", false);
 
         Assert.DoesNotContain("key- Ctrl", _sink.Events);
 
-        Press(30, "new-tab", false);
+        Press(30, "next-tab", false);
         Assert.Equal("key- Ctrl", _sink.Events[^1]);
     }
 
@@ -100,14 +100,48 @@ public class ControllerTests
         Assert.Equal(["text Helsinki"], _sink.Events);
     }
 
-    [Fact]
-    public void The_scroll_stick_scrolls_up_when_pushed_up()
-    {
-        _kbm.OnInput("p", ++_seq, new Dictionary<string, ControlValue> { ["scroll"] = ControlValue.Axes(0, -1) }, 0);
-        _kbm.Tick(0);
-        _kbm.Tick(100);
+    private void Strip(params TouchPoint[] fingers) =>
+        _kbm.OnInput("p", ++_seq, new Dictionary<string, ControlValue> { ["scroll"] = ControlValue.Fingers(fingers) }, 0);
 
-        Assert.Equal(["wheel 240"], _sink.Events);
+    [Fact]
+    public void Dragging_down_the_scroll_strip_scrolls_up_like_a_phone()
+    {
+        Strip(new TouchPoint(0, 0.5, 0.2));
+        Strip(new TouchPoint(0, 0.5, 0.45));
+        Strip(new TouchPoint(0, 0.5, 0.7));
+        Strip();
+
+        // Half the strip is 600 wheel units, sent as the finger moves (less a remainder under one chunk).
+        Assert.All(_sink.Events, e => Assert.StartsWith("wheel ", e));
+        Assert.InRange(_sink.Events.Sum(e => int.Parse(e["wheel ".Length..])), 570, 600);
+
+        _sink.Events.Clear();
+        Strip(new TouchPoint(0, 0.5, 0.7));
+        Strip(new TouchPoint(0, 0.5, 0.6));
+        // Up a tenth: about -120, the other way.
+        Assert.InRange(_sink.Events.Sum(e => int.Parse(e["wheel ".Length..])), -120, -90);
+    }
+
+    [Fact]
+    public void Lifting_and_landing_elsewhere_on_the_strip_does_not_scroll()
+    {
+        Strip(new TouchPoint(0, 0.5, 0.2));
+        Strip();
+        Strip(new TouchPoint(0, 0.5, 0.9));
+        // The same id, re-landed between two frames: a jump, not a drag.
+        Strip(new TouchPoint(0, 0.5, 0.1));
+
+        Assert.Empty(_sink.Events);
+    }
+
+    [Fact]
+    public void A_second_finger_on_the_strip_is_ignored()
+    {
+        Strip(new TouchPoint(0, 0.5, 0.5));
+        Strip(new TouchPoint(0, 0.5, 0.5), new TouchPoint(1, 0.5, 0.1));
+        Strip(new TouchPoint(0, 0.5, 0.5), new TouchPoint(1, 0.5, 0.9));
+
+        Assert.Empty(_sink.Events);
     }
 
     [Fact]
@@ -212,6 +246,28 @@ public class GestureTests
         var move = Assert.Single(_sink.Events);
         Assert.StartsWith("move 0,", move);
         Assert.True(int.Parse(move.Split(',')[1]) > 0, "Moving the finger down moves the pointer down.");
+    }
+
+    [Fact]
+    public void Pointer_speed_scales_the_pointer_and_is_clamped()
+    {
+        int Slide()
+        {
+            _sink.Events.Clear();
+            Touch(_seq * 100, (0.5, 0.5));
+            Touch(_seq * 100 + 50, (0.5, 0.55));
+            Touch(_seq * 100 + 100);
+            return int.Parse(Assert.Single(_sink.Events).Split(',')[1]);
+        }
+
+        var normal = Slide();
+        _kbm.PointerSpeed = 2;
+        Assert.Equal(normal * 2, Slide(), tolerance: 1);
+
+        _kbm.PointerSpeed = 100;
+        Assert.Equal(KbmController.MaxPointerSpeed, _kbm.PointerSpeed);
+        _kbm.PointerSpeed = double.NaN;
+        Assert.Equal(1, _kbm.PointerSpeed);
     }
 
     [Fact]

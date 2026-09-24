@@ -20,10 +20,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\MobileKbm.Core\MobileKbm.Core.csproj" />
     <ProjectReference Include="..\..\..\shared\Phonepads.Protocol\Phonepads.Protocol.csproj" />
   </ItemGroup>

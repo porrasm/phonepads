@@ -78,6 +78,15 @@ public sealed class ControlDto
 
     /// <summary>Text: longest text the player can send, 1–1000.</summary>
     [JsonPropertyName("maxLength")] public int? MaxLength { get; init; }
+
+    /// <summary>
+    /// Buttons, joysticks, text and touchpads: exact centre as a percentage (0–100) of the
+    /// controller's width, from the left. The phone still picks the size.
+    /// </summary>
+    [JsonPropertyName("x")] public double? X { get; init; }
+
+    /// <summary>Exact centre as a percentage (0–100) of the controller's height, from the top.</summary>
+    [JsonPropertyName("y")] public double? Y { get; init; }
 }
 
 public sealed class SetupResponse

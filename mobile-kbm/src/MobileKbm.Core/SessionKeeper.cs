@@ -82,7 +82,10 @@ public sealed class SessionKeeper
     private CancellationTokenSource? _sessionCts;
     private ISessionConnection? _connection;
     private string _serviceState = string.Empty;
-    private long _lastConnected;
+    private const long NotDown = long.MinValue;
+
+    /// <summary>Timestamp the socket went down, or <see cref="NotDown"/> while it is up.</summary>
+    private long _downSince = NotDown;
     private KeeperStatus _status = KeeperStatus.NeedsKey;
     private string? _detail;
 
@@ -312,11 +315,14 @@ public sealed class SessionKeeper
         {
             if (status == ConnectionStatus.Connected)
             {
-                Interlocked.Exchange(ref _lastConnected, _time.GetTimestamp());
+                Interlocked.Exchange(ref _downSince, NotDown);
                 Publish(KeeperStatus.Online, null);
             }
             else if (status is ConnectionStatus.Reconnecting or ConnectionStatus.Connecting)
             {
+                // Only the first report of a drop counts: retries must not restart the clock.
+                Interlocked.CompareExchange(ref _downSince, _time.GetTimestamp(), NotDown);
+
                 // Releases may be lost while we are away; let go now rather than risk a stuck key.
                 _controller.ReleaseAll();
                 Publish(status == ConnectionStatus.Connecting ? KeeperStatus.Connecting : KeeperStatus.Reconnecting, null);
@@ -336,7 +342,8 @@ public sealed class SessionKeeper
             _phones.Clear();
         }
 
-        Interlocked.Exchange(ref _lastConnected, _time.GetTimestamp());
+        // Not connected yet: the first connection gets the same grace as a reconnection.
+        Interlocked.Exchange(ref _downSince, _time.GetTimestamp());
 
         try
         {
@@ -345,8 +352,12 @@ public sealed class SessionKeeper
             {
                 await Task.WhenAny(run, Task.Delay(WatchdogInterval, _time, over.Token));
 
-                var away = _time.GetElapsedTime(Interlocked.Read(ref _lastConnected));
-                if (connection.Status != ConnectionStatus.Connected && away > LostAfter) End();
+                var downSince = Interlocked.Read(ref _downSince);
+                if (downSince != NotDown && connection.Status != ConnectionStatus.Connected
+                    && _time.GetElapsedTime(downSince) > LostAfter)
+                {
+                    End();
+                }
             }
 
             try

@@ -56,7 +56,8 @@ public class SchemaTests
         Assert.Contains("\"skipLobby\":true", json);
         Assert.Contains("\"private\":true", json);
         Assert.Contains("\"type\":\"touchpad\"", json);
-        Assert.Contains("\"aspect\":1.2", json);
+        Assert.Contains("\"aspect\":0.25", json);
+        Assert.Contains("\"x\":22,\"y\":91", json);
         Assert.Contains("\"type\":\"raw\"", json);
     }
 
