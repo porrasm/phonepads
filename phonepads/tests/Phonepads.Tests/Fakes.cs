@@ -10,6 +10,12 @@ public sealed class FakeConnection : ISessionConnection
 
     public List<(string PlayerId, int Ms)> Vibrations { get; } = [];
 
+    public List<(string? PlayerId, string Text)> Texts { get; } = [];
+
+    public List<string> Kicked { get; } = [];
+
+    public List<(string? PlayerId, string SchemaId)> SchemaPushes { get; } = [];
+
     public bool Disposed { get; private set; }
 
     public ConnectionStatus Status { get; private set; } = ConnectionStatus.Idle;
@@ -40,9 +46,29 @@ public sealed class FakeConnection : ISessionConnection
 
     public Task EndAsync(CancellationToken ct) => Record("end");
 
+    public Task LobbyAsync(CancellationToken ct) => Record("lobby");
+
+    public Task KickAsync(string playerId, CancellationToken ct)
+    {
+        Kicked.Add(playerId);
+        return Record("kick");
+    }
+
+    public Task SetSchemaAsync(string? playerId, string schemaId, CancellationToken ct)
+    {
+        SchemaPushes.Add((playerId, schemaId));
+        return Record("set_schema");
+    }
+
     public Task VibrateAsync(string playerId, int milliseconds, CancellationToken ct)
     {
         Vibrations.Add((playerId, milliseconds));
+        return Task.CompletedTask;
+    }
+
+    public Task ShowTextAsync(string? playerId, string text, CancellationToken ct)
+    {
+        Texts.Add((playerId, text));
         return Task.CompletedTask;
     }
 
@@ -57,6 +83,9 @@ public sealed class FakeConnection : ISessionConnection
     public void RaiseSnapshot(string state, params PlayerInfo[] players) =>
         SnapshotReceived?.Invoke(new SessionSnapshot(state, players));
 
+    public void RaiseSnapshot(string state, int protocolVersion, params PlayerInfo[] players) =>
+        SnapshotReceived?.Invoke(new SessionSnapshot(state, players, protocolVersion));
+
     public void RaiseStateChanged(string state, string? reason = null) => StateChanged?.Invoke(state, reason);
 
     public void RaisePlayerChanged(PlayerInfo player) => PlayerChanged?.Invoke(player);
@@ -69,12 +98,12 @@ public sealed class FakeConnection : ISessionConnection
     public void RaiseMotion(string playerId, params MotionSample[] samples) =>
         MotionReceived?.Invoke(playerId, samples);
 
+    public void RaiseError(string code, string message) => ErrorReceived?.Invoke(code, message);
+
     public void RaiseStopped(string reason) => Stopped?.Invoke(reason);
 
     public void RaiseText(string playerId, string controlId, string text) =>
         TextReceived?.Invoke(playerId, controlId, text);
-
-    public void RaiseError(string code, string message) => ErrorReceived?.Invoke(code, message);
 
     private Task Record(string command)
     {

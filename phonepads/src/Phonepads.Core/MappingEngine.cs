@@ -49,6 +49,11 @@ public static class MappingEngine
                     ApplyAxes(assignment.Target, control, tuning, value.X, value.Y,
                         ref leftX, ref leftY, ref rightX, ref rightY, ref buttons);
                     break;
+
+                case ControlValueKind.Number:
+                    ApplyAmount(assignment.Target, control, tuning, value.Value,
+                        ref leftX, ref leftY, ref rightX, ref rightY, ref leftTrigger, ref rightTrigger, ref buttons);
+                    break;
             }
         }
 
@@ -119,6 +124,45 @@ public static class MappingEngine
                 // An analogue source on a button target presses it past the threshold.
                 if (Math.Abs(x) >= DpadThreshold || Math.Abs(y) >= DpadThreshold)
                     buttons |= ButtonFlag(target);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Routes a 0..1 amount — a real gamepad's analog trigger. Its natural home is a trigger,
+    /// where it passes through as-is; on an axis target it is a one-directional axis, and on
+    /// a button it presses past the same threshold an analogue stick would.
+    /// </summary>
+    private static void ApplyAmount(
+        PadTarget target,
+        SchemaControl control,
+        AxisTuning tuning,
+        double amount,
+        ref double leftX,
+        ref double leftY,
+        ref double rightX,
+        ref double rightY,
+        ref double leftTrigger,
+        ref double rightTrigger,
+        ref PadButtons buttons)
+    {
+        var conditioned = Condition(amount, tuning.Deadzone, tuning.Sensitivity, invert: false);
+
+        switch (target)
+        {
+            case PadTarget.LeftTrigger:
+                leftTrigger = Stronger(leftTrigger, conditioned);
+                break;
+
+            case PadTarget.RightTrigger:
+                rightTrigger = Stronger(rightTrigger, conditioned);
+                break;
+
+            default:
+                // An amount has no direction of its own; treat it as a deflection along x,
+                // which the axis targets read directly and the button targets threshold.
+                ApplyAxes(target, control, tuning, amount, 0,
+                    ref leftX, ref leftY, ref rightX, ref rightY, ref buttons);
                 break;
         }
     }

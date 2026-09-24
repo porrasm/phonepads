@@ -19,7 +19,8 @@ public sealed class ServiceDriverApi(DriverClient client) : IDriverApi
         client.CreateAsync(driverKey, config, replaceExisting: true, ct);
 
     public ISessionConnection Connect(SetupResponse session) =>
-        new SessionConnection(client.BaseUri, session.WsPath ?? string.Empty);
+        new SessionConnection(session.SocketUri(client.BaseUri)
+            ?? throw new SetupException("The service returned no session to connect to."));
 }
 
 public enum KeeperStatus

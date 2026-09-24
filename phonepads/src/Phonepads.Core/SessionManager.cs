@@ -21,6 +21,17 @@ public sealed record SessionPlayer(PlayerInfo Info, int Slot, PadBackend Backend
     public bool HasPad => Slot != Unassigned;
 }
 
+/// <summary>What the session tells the service about the game, beyond the layouts on offer.</summary>
+public sealed record SessionOptions
+{
+    public string? GameName { get; init; }
+    public int MinPlayers { get; init; } = 1;
+    public int MaxPlayers { get; init; } = 4;
+
+    /// <summary>Let players join while the game runs. A late joiner lands straight on the controller.</summary>
+    public bool AllowLateJoin { get; init; }
+}
+
 /// <summary>
 /// Runs one session end to end: claims it, tracks the lobby, and turns input frames and
 /// motion samples into virtual pads. Owns the pads, so closing it leaves nothing behind (PLAY-5).
@@ -30,8 +41,18 @@ public sealed class SessionManager : IAsyncDisposable
     /// <summary>Windows accepts at most four XInput controllers, whatever the service allows.</summary>
     public const int MaxPads = 4;
 
+    /// <summary>The service accepts up to this many phone layouts per session.</summary>
+    public const int MaxSchemas = 32;
+
+    /// <summary>
+    /// Phonepads' identity towards phones, generated once and shipped with the app. Phones file
+    /// the layouts players edit under it, so a player's tweaks to a preset survive between
+    /// sessions. The service never sees or interprets it beyond relaying it.
+    /// </summary>
+    public const string DriverAppUuid = "3f0c9a7e-5b21-4d8e-9a64-2c7b1e8f0d53";
+
     private readonly IReadOnlyDictionary<PadBackend, IVirtualPadHub> _hubs;
-    private readonly Func<Uri, string, ISessionConnection> _connect;
+    private readonly Func<Uri, ISessionConnection> _connect;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, SessionPlayer> _players = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _latestSeq = new(StringComparer.Ordinal);
@@ -44,13 +65,13 @@ public sealed class SessionManager : IAsyncDisposable
     private Task? _pump;
 
     public SessionManager(IReadOnlyDictionary<PadBackend, IVirtualPadHub> hubs)
-        : this(hubs, (baseUri, wsPath) => new SessionConnection(baseUri, wsPath))
+        : this(hubs, socketUri => new SessionConnection(socketUri))
     {
     }
 
     public SessionManager(
         IReadOnlyDictionary<PadBackend, IVirtualPadHub> hubs,
-        Func<Uri, string, ISessionConnection> connectionFactory)
+        Func<Uri, ISessionConnection> connectionFactory)
     {
         _hubs = hubs;
         _connect = connectionFactory;
@@ -85,32 +106,43 @@ public sealed class SessionManager : IAsyncDisposable
 
     /// <summary>
     /// Claims the session with a single-use setup code and starts the WebSocket pump.
-    /// The offered schemas become the layouts players can choose from.
+    /// The offered schemas become the layouts players can choose from; offering
+    /// <see cref="PhysicalGamepad.Mapped"/> among them adds the "Real gamepad" option.
     /// </summary>
-    public async Task<SetupResponse> ClaimAsync(
+    public Task<SetupResponse> ClaimAsync(
         DriverClient client,
         string setupCode,
         IReadOnlyList<MappedSchema> offered,
-        string? gameName,
-        int minPlayers,
-        int maxPlayers,
-        CancellationToken ct)
+        SessionOptions options,
+        CancellationToken ct) =>
+        ObtainAsync(client, offered, options, config => client.ClaimAsync(setupCode, config, ct));
+
+    /// <summary>
+    /// Creates a session with a driver key instead of a setup code — no host in a browser
+    /// needed. Otherwise identical to <see cref="ClaimAsync"/>.
+    /// </summary>
+    public Task<SetupResponse> CreateAsync(
+        DriverClient client,
+        string driverKey,
+        bool replaceExisting,
+        IReadOnlyList<MappedSchema> offered,
+        SessionOptions options,
+        CancellationToken ct) =>
+        ObtainAsync(client, offered, options, config => client.CreateAsync(driverKey, config, replaceExisting, ct));
+
+    private async Task<SetupResponse> ObtainAsync(
+        DriverClient client,
+        IReadOnlyList<MappedSchema> offered,
+        SessionOptions options,
+        Func<SessionConfig, Task<SetupResponse>> obtain)
     {
         ValidateOffer(offered);
         SetPhase(SessionPhase.Claiming);
 
-        var config = new SessionConfig
-        {
-            Game = string.IsNullOrWhiteSpace(gameName) ? null : gameName,
-            MinPlayers = minPlayers,
-            MaxPlayers = maxPlayers,
-            Schemas = offered.Select(s => s.Schema.ToDto()).ToList(),
-        };
-
         SetupResponse response;
         try
         {
-            response = await client.ClaimAsync(setupCode, config, ct);
+            response = await obtain(BuildConfig(offered, options));
         }
         catch
         {
@@ -123,24 +155,44 @@ public sealed class SessionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Connects to an already claimed session. <see cref="ClaimAsync"/> calls this after the
-    /// setup call; tests call it directly with a fake connection.
+    /// The config the service is asked for: the phone layouts, the real-gamepad flag when
+    /// that option is among the offer, and the app's identity so phones remember edits.
+    /// </summary>
+    public static SessionConfig BuildConfig(IReadOnlyList<MappedSchema> offered, SessionOptions options) => new()
+    {
+        Game = string.IsNullOrWhiteSpace(options.GameName) ? null : options.GameName,
+        DriverAppUuid = DriverAppUuid,
+        MinPlayers = options.MinPlayers,
+        MaxPlayers = options.MaxPlayers,
+        AllowPhysicalGamepad = offered.Any(s => s.Schema.IsPhysicalGamepad) ? true : null,
+        AllowLateJoin = options.AllowLateJoin ? true : null,
+        Schemas = offered.Where(s => !s.Schema.IsPhysicalGamepad).Select(s => s.Schema.ToDto()).ToList(),
+    };
+
+    /// <summary>
+    /// Connects to an already obtained session. <see cref="ClaimAsync"/> and
+    /// <see cref="CreateAsync"/> call this after the HTTP call; tests call it directly with a
+    /// fake connection.
     /// </summary>
     public void Attach(Uri baseUri, SetupResponse response, IReadOnlyList<MappedSchema> offered)
     {
         ValidateOffer(offered);
 
+        var socketUri = response.SocketUri(baseUri)
+            ?? throw new SetupException("The service returned no address to connect to.");
+
         _offered = offered;
         JoinCode = response.JoinCode;
         JoinUrl = response.JoinUrl;
 
-        var connection = _connect(baseUri, response.WsPath ?? string.Empty);
+        var connection = _connect(socketUri);
         connection.SnapshotReceived += OnSnapshot;
         connection.StateChanged += OnStateChanged;
         connection.PlayerChanged += OnPlayerChanged;
         connection.PlayerLeft += OnPlayerLeft;
         connection.InputReceived += OnInput;
         connection.MotionReceived += OnMotion;
+        connection.ErrorReceived += OnError;
         connection.StatusChanged += status => ConnectionChanged?.Invoke(status);
         connection.ErrorReceived += (_, message) => Notice?.Invoke(message);
         connection.Stopped += reason =>
@@ -159,8 +211,11 @@ public sealed class SessionManager : IAsyncDisposable
 
     private static void ValidateOffer(IReadOnlyList<MappedSchema> offered)
     {
-        if (offered.Count is < 1 or > 4)
-            throw new ArgumentException("A session offers 1 to 4 schemas.", nameof(offered));
+        var layouts = offered.Count(s => !s.Schema.IsPhysicalGamepad);
+        if (layouts < 1)
+            throw new ArgumentException("A session offers at least one phone layout; a real gamepad is an extra option alongside.", nameof(offered));
+        if (layouts > MaxSchemas)
+            throw new ArgumentException($"A session offers at most {MaxSchemas} phone layouts.", nameof(offered));
 
         var problems = offered.SelectMany(s => s.Schema.Validate()).ToList();
         if (problems.Count > 0)
@@ -211,6 +266,23 @@ public sealed class SessionManager : IAsyncDisposable
         SetPhase(SessionPhase.Running);
     }
 
+    /// <summary>
+    /// Ends the round but keeps the session: everyone goes back to the lobby with ready
+    /// cleared, free to change name, colour and layout before the next start. Pads stay,
+    /// released to neutral, and players keep their slots.
+    /// </summary>
+    public async Task ReturnToLobbyAsync(CancellationToken ct)
+    {
+        if (_connection is null) return;
+        await _connection.LobbyAsync(ct);
+        ReleaseAllPads();
+        SetPhase(SessionPhase.Lobby);
+    }
+
+    /// <summary>Removes a player as if they had left; the service confirms with player_left.</summary>
+    public Task KickAsync(string playerId, CancellationToken ct) =>
+        _connection?.KickAsync(playerId, ct) ?? Task.CompletedTask;
+
     /// <summary>Ends the session and removes every pad (PLAY-5).</summary>
     public async Task EndAsync(CancellationToken ct)
     {
@@ -240,6 +312,13 @@ public sealed class SessionManager : IAsyncDisposable
             _ => Phase,
         });
 
+        if (snapshot.ProtocolVersion != 0 && snapshot.ProtocolVersion != DriverClient.ProtocolVersion)
+        {
+            Notice?.Invoke(
+                $"The service reports protocol version {snapshot.ProtocolVersion}; this app was built for " +
+                $"version {DriverClient.ProtocolVersion}. Things may not work until Phonepads is updated.");
+        }
+
         RaisePlayersChanged();
     }
 
@@ -263,16 +342,33 @@ public sealed class SessionManager : IAsyncDisposable
                 SetPhase(SessionPhase.Ended);
                 Notice?.Invoke(reason switch
                 {
-                    null => "The session ended.",
+                    null or "driver_command" => "The session ended.",
                     "driver_lost" => "The service closed the session because this app was away for too long. Claim a new one.",
+                    "host_ended" => "The host ended the session from the website.",
+                    "inactivity" => "The service closed the session after a day without activity.",
                     _ => $"The session ended ({reason}).",
                 });
                 break;
 
             case "waiting_for_players":
+                // A round ended (lobby) or the game never left the lobby; no input arrives here.
+                ReleaseAllPads();
                 SetPhase(SessionPhase.Lobby);
                 break;
         }
+    }
+
+    private void OnError(string code, string message)
+    {
+        // A refused start means the phase set optimistically in StartAsync never happened.
+        if (code == "cannot_start" && Phase == SessionPhase.Running) SetPhase(SessionPhase.Lobby);
+
+        Notice?.Invoke(code switch
+        {
+            "cannot_start" => "The game could not start: not everyone is joined, connected and ready.",
+            "invalid_state" => "The service refused that: " + message,
+            _ => message,
+        });
     }
 
     private void OnPlayerChanged(PlayerInfo info)
@@ -287,7 +383,8 @@ public sealed class SessionManager : IAsyncDisposable
             if (!info.Connected && _pads.TryGetValue(player.Slot, out var pad))
                 pad.Reset();
 
-            // Switching schema mid-session may mean a different kind of pad.
+            // Switching schema mid-session may mean a different kind of pad, and a late
+            // joiner lands straight on the controller with no start to create one.
             if (Phase is SessionPhase.Running or SessionPhase.Paused) EnsurePad(player);
         }
 
@@ -340,9 +437,13 @@ public sealed class SessionManager : IAsyncDisposable
         MotionUpdated?.Invoke(playerId, samples[^1]);
     }
 
+    /// <summary>
+    /// The offered entry for a schema id, falling back to the first phone layout. A player on
+    /// a layout that was not offered (there is none today) is treated like the first one.
+    /// </summary>
     private MappedSchema SchemaFor(string? schemaId) =>
         _offered.FirstOrDefault(s => string.Equals(s.Schema.Id, schemaId, StringComparison.Ordinal))
-        ?? _offered[0];
+        ?? _offered.First(s => !s.Schema.IsPhysicalGamepad);
 
     /// <summary>Adds or refreshes a player, assigning the next free pad slot on first sight.</summary>
     private void Upsert(PlayerInfo info)
@@ -429,7 +530,8 @@ public sealed class SessionManager : IAsyncDisposable
         var strength = Math.Max(large, small);
         if (strength == 0) return;
 
-        // Scale the motor strength into a short buzz the phone can actually render.
+        // Scale the motor strength into a short buzz the phone can actually render. A player
+        // on a real gamepad feels it in the controller instead; the phone handles that.
         var milliseconds = 40 + (int)(strength / 255d * 160);
         _ = _connection.VibrateAsync(playerId, milliseconds, CancellationToken.None);
     }

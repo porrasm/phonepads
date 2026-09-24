@@ -21,8 +21,10 @@ public interface ISessionConnection : IAsyncDisposable
     event Action<string, string, string>? TextReceived;
 
     /// <summary>
-    /// The service refused something the driver sent (code, message). Not fatal: the session
-    /// carries on. Codes are a fixed but growing set — treat unknown ones as generic.
+    /// The service refused something the driver sent: code and message. Codes are a fixed set
+    /// (invalid_state, cannot_start, profile_taken, profile_locked, unknown_schema,
+    /// unknown_player) that may grow — treat unknown ones as generic. Not fatal: the session
+    /// carries on.
     /// </summary>
     event Action<string, string>? ErrorReceived;
 
@@ -34,5 +36,18 @@ public interface ISessionConnection : IAsyncDisposable
     Task PauseAsync(CancellationToken ct);
     Task ResumeAsync(CancellationToken ct);
     Task EndAsync(CancellationToken ct);
+
+    /// <summary>Ends the round, not the session: back to the lobby with everyone's ready cleared.</summary>
+    Task LobbyAsync(CancellationToken ct);
+
+    /// <summary>Removes a player as if they had left. Not a ban — the join code still works for them.</summary>
+    Task KickAsync(string playerId, CancellationToken ct);
+
+    /// <summary>Puts one player (or everyone, with a null id) on one of the offered schemas.</summary>
+    Task SetSchemaAsync(string? playerId, string schemaId, CancellationToken ct);
+
     Task VibrateAsync(string playerId, int milliseconds, CancellationToken ct);
+
+    /// <summary>Shows a short line above one player's controls (or everyone's, with a null id).</summary>
+    Task ShowTextAsync(string? playerId, string text, CancellationToken ct);
 }

@@ -23,6 +23,12 @@ public sealed class DriverClient(HttpClient http, Uri baseUri)
 {
     public const string DefaultBaseUrl = "https://gamepad.porras.club";
 
+    /// <summary>
+    /// The protocol version this app speaks. Pinned on every setup so a server that has moved
+    /// on refuses cleanly (and keeps the setup code) instead of sending something unexpected.
+    /// </summary>
+    public const int ProtocolVersion = 1;
+
     private readonly HttpClient _http = http;
 
     public Uri BaseUri { get; } = baseUri;
@@ -34,7 +40,12 @@ public sealed class DriverClient(HttpClient http, Uri baseUri)
         SessionConfig? config,
         CancellationToken ct)
     {
-        var request = new SetupRequest { SetupCode = setupCode.Trim().ToUpperInvariant(), Config = config };
+        var request = new SetupRequest
+        {
+            SetupCode = setupCode.Trim().ToUpperInvariant(),
+            ProtocolVersion = ProtocolVersion,
+            Config = config,
+        };
         var json = JsonSerializer.Serialize(request, ProtocolJson.Default.SetupRequest);
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri, "/api/gamepad/driver/setup"))
         {
@@ -55,7 +66,7 @@ public sealed class DriverClient(HttpClient http, Uri baseUri)
         bool replaceExisting,
         CancellationToken ct)
     {
-        var request = new CreateRequest { Config = config, ProtocolVersion = 1, ReplaceExisting = replaceExisting };
+        var request = new CreateRequest { Config = config, ProtocolVersion = ProtocolVersion, ReplaceExisting = replaceExisting };
         var json = JsonSerializer.Serialize(request, ProtocolJson.Default.CreateRequest);
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(BaseUri, "/api/gamepad/driver/create"))
         {
@@ -102,9 +113,17 @@ public sealed class DriverClient(HttpClient http, Uri baseUri)
 
             if (response.IsSuccessStatusCode && parsed is { Success: true })
             {
-                if (string.IsNullOrEmpty(parsed.DriverToken) || string.IsNullOrEmpty(parsed.WsPath))
+                if (string.IsNullOrEmpty(parsed.DriverToken) || parsed.SocketUri(BaseUri) is null)
                     throw new SetupException("The service accepted the request but returned no session to connect to.");
                 return parsed;
+            }
+
+            if (parsed?.Supported is { Count: > 0 } supported)
+            {
+                throw new SetupException(
+                    $"This service speaks protocol version {string.Join(", ", supported)}, but this app speaks " +
+                    $"version {ProtocolVersion}. Update to a version that matches.",
+                    response.StatusCode);
             }
 
             throw new SetupException(explain(response.StatusCode, parsed?.Error), response.StatusCode);
@@ -116,7 +135,7 @@ public sealed class DriverClient(HttpClient http, Uri baseUri)
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
             "The driver key was not accepted. It may have been revoked — issue a new one on the Gamepad website.",
         HttpStatusCode.Conflict =>
-            "This driver key already has an active session.",
+            "This driver key already has an active session. End it on the Gamepad website, or replace it.",
         HttpStatusCode.TooManyRequests =>
             "Too many attempts. Wait a minute and try again.",
         HttpStatusCode.BadRequest =>

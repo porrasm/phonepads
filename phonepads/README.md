@@ -1,16 +1,18 @@
 # Phonepads
 
 A portable Windows app that turns phones into real game controllers — Xbox pads for anything on
-Windows, or Wii Remotes with motion for Dolphin.
+Windows, or Wii Remotes with motion for Dolphin. A real controller paired with a phone works too:
+the phone relays it, and it comes out the other end as an Xbox pad.
 
 It is a **driver** for the [Gamepad service](https://gamepad.porras.club): it claims a session with a
-setup code, shows a join code for players to scan, receives their input over a WebSocket, and turns
-that input into virtual controllers.
+setup code (or opens one itself with a driver key), shows a join code for players to scan, receives
+their input over a WebSocket, and turns that input into virtual controllers.
 
 ```
-Phone → [Gamepad service] → Phonepads → Mapping → Virtual pad → Game
-                                                  ├─ Xbox 360 pad (ViGEmBus)   → any Windows game
-                                                  └─ Wii Remote  (DSU / UDP)    → Dolphin
+Phone ──────────────┐
+Real pad → Phone ───┴→ [Gamepad service] → Phonepads → Mapping → Virtual pad → Game
+                                                                 ├─ Xbox 360 pad (ViGEmBus)   → any Windows game
+                                                                 └─ Wii Remote  (DSU / UDP)    → Dolphin
 ```
 
 See [specs.md](specs.md) for the user stories and [protocol.txt](../protocol.txt) for the service protocol.
@@ -23,11 +25,17 @@ and drive virtual pads from phone input.
 Working:
 
 - Claiming a session with a setup code, with friendly errors for the failure cases
+- Opening a session with a **driver key** instead — no host in a browser, just "click start, show
+  the QR code"
 - Join code and scannable QR code
-- Lobby with live player list, colours, ready state and pad assignment
-- Start / pause / resume / end, with pads released to neutral on pause and removed on end
+- Lobby with live player list, colours, ready state, pad assignment, and a Kick button
+- Start / pause / resume / back-to-lobby / end, with pads released to neutral on pause and removed on end
+- Optional late join, for games that can cope with a controller appearing mid-match
 - **Two kinds of controller, mixable in one session**: each layout declares whether it drives an
   Xbox pad or a Wii Remote, and every player gets whichever their chosen layout needs
+- **Real gamepads**: offer the "Real gamepad" option and a player can pair a controller with their
+  phone (Bluetooth or USB); it arrives in the standard layout — analog triggers included — and is
+  mapped one-to-one onto an Xbox pad, so it behaves as if plugged into the PC
 - Ten bundled layouts with default mappings: Generic Gamepad, a single-stick GameCube layout for
   Dolphin, Wii Remote (upright, with Nunchuk, and sideways), and five genre layouts
 - Wii Remote mode streams the phone's raw motion sensors to Dolphin as an emulated Wii Remote with
@@ -71,6 +79,12 @@ dotnet run --project phonepads/src/Phonepads.App
 2. Pick the layouts you want to offer, paste the code, and claim the session.
 3. Players scan the QR code or type the join code on their phones.
 4. Press **Start game** once everyone is ready.
+
+Or skip step 1 for good: make a driver key on the website's front page (under *Driver keys*), paste
+it into the app once, and press **Start with key**. The key is kept in `phonepads.settings.json`
+beside the executable, so anyone with that folder can open sessions in your name — revoke it on the
+website if that ever matters. One session per key: tick *Replace my existing session* to have
+the app end a previous one (say, after a crash) instead of refusing.
 
 ## Wii Remote mode (Dolphin)
 
@@ -142,12 +156,18 @@ session hands each player a pad from the hub their layout needs, and swaps it if
 
 ## Notes on the protocol
 
-The service is in beta and its protocol can change. Two places make that explicit:
+The app speaks protocol version 1, which the service has frozen: later versions only add. The app
+pins the version at setup (a server that has moved on refuses cleanly and keeps the setup code),
+ignores message types and fields it does not know, and reads control values by shape rather than by
+id — the same id can be a boolean in a touch layout and a 0..1 number on a real gamepad.
 
-- Player objects are parsed defensively — the docs spell the schema and connection fields more than
-  one way, so both spellings are accepted and missing fields fall back to sensible defaults.
-- The parsing of a snapshot's player list is inferred from the developer guide rather than verified
-  against a live session. If players show up unnamed or unassigned, that is the first place to look.
+Two protocol rules shape the real-gamepad path:
+
+- The service reserves the schema id `physical-gamepad`; it is never sent in the config, a flag
+  offers it instead. `PhysicalGamepad` in Core describes the fixed control set the phone sends and
+  ships the one-to-one Xbox mapping. Its controls are the phone's, only the mapping is ours.
+- Analog triggers are the one value shape touch never produces. They pass through to the pad's
+  triggers as-is; on any other target they act as a one-way axis or a thresholded button.
 
 Two protocol rules shape the motion path and are worth knowing if you touch it:
 

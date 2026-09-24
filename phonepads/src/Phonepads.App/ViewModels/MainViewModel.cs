@@ -58,6 +58,9 @@ public partial class MainViewModel : ViewModelBase
         GameName = settings.GameName ?? string.Empty;
         BaseUrl = settings.BaseUrl;
         RumbleEnabled = settings.RumbleEnabled;
+        AllowLateJoin = settings.AllowLateJoin;
+        DriverKey = settings.DriverKey ?? string.Empty;
+        ReplaceExistingSession = settings.ReplaceExistingSession;
 
         foreach (var preset in Presets.All)
         {
@@ -109,6 +112,18 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool RumbleEnabled { get; set; }
 
+    /// <summary>Let players join mid-game. Only sensible for games that cope with a pad appearing.</summary>
+    [ObservableProperty]
+    public partial bool AllowLateJoin { get; set; }
+
+    /// <summary>A driver key from the website (gpk_…): opens sessions with no setup code at all.</summary>
+    [ObservableProperty]
+    public partial string DriverKey { get; set; }
+
+    /// <summary>With a driver key, end the account's existing session first rather than fail.</summary>
+    [ObservableProperty]
+    public partial bool ReplaceExistingSession { get; set; }
+
     [ObservableProperty]
     public partial bool DriverAvailable { get; set; }
 
@@ -152,13 +167,14 @@ public partial class MainViewModel : ViewModelBase
         get
         {
             var chosen = SchemaOptions.Where(o => o.IsSelected).ToList();
-            var count = chosen.Count;
-            var text = count switch
+            var layouts = chosen.Count(o => !o.IsPhysicalGamepad);
+            var realPads = chosen.Any(o => o.IsPhysicalGamepad);
+            var text = layouts switch
             {
-                0 => "Choose at least one layout.",
-                > 4 => "Choose at most four layouts.",
-                1 => "1 layout offered.",
-                _ => $"{count} layouts offered — players pick on their phones.",
+                0 => "Choose at least one phone layout.",
+                > SessionManager.MaxSchemas => $"Choose at most {SessionManager.MaxSchemas} phone layouts.",
+                1 => realPads ? "1 layout offered, plus real gamepads." : "1 layout offered.",
+                _ => $"{layouts} layouts offered{(realPads ? ", plus real gamepads" : "")} — players pick on their phones.",
             };
 
             if (chosen.Any(o => o.IsWiiRemote) && !WiiAvailable)
@@ -169,6 +185,30 @@ public partial class MainViewModel : ViewModelBase
             return text;
         }
     }
+
+    /// <summary>The offer the selection amounts to, or null with a reason when it is not one.</summary>
+    private List<MappedSchema>? ChosenOffer(out string? problem)
+    {
+        var chosen = SchemaOptions.Where(o => o.IsSelected).Select(o => o.Mapped).ToList();
+        var layouts = chosen.Count(m => !m.Schema.IsPhysicalGamepad);
+
+        problem = layouts switch
+        {
+            0 => "Offer at least one phone layout. Real gamepads are an extra option alongside.",
+            > SessionManager.MaxSchemas => $"Offer at most {SessionManager.MaxSchemas} phone layouts.",
+            _ => null,
+        };
+
+        return problem is null ? chosen : null;
+    }
+
+    private SessionOptions Options => new()
+    {
+        GameName = GameName,
+        MinPlayers = MinPlayers,
+        MaxPlayers = MaxPlayers,
+        AllowLateJoin = AllowLateJoin,
+    };
 
     // ---- Session ----
 
@@ -199,6 +239,8 @@ public partial class MainViewModel : ViewModelBase
 
     public bool CanResume => Phase == SessionPhase.Paused;
 
+    public bool CanReturnToLobby => Phase is SessionPhase.Running or SessionPhase.Paused;
+
     public string ReadySummary
     {
         get
@@ -211,20 +253,45 @@ public partial class MainViewModel : ViewModelBase
     // ---- Commands ----
 
     [RelayCommand]
-    private async Task ClaimAsync()
+    private Task ClaimAsync()
     {
-        ErrorMessage = null;
-
-        var chosen = SchemaOptions.Where(o => o.IsSelected).Select(o => o.Mapped).ToList();
-        if (chosen.Count is < 1 or > 4)
-        {
-            ErrorMessage = "Offer between one and four layouts.";
-            return;
-        }
-
         if (string.IsNullOrWhiteSpace(SetupCode))
         {
             ErrorMessage = "Enter the setup code from the website.";
+            return Task.CompletedTask;
+        }
+
+        return ObtainAsync(
+            "Claiming the session…",
+            (session, client, offer) => session.ClaimAsync(client, SetupCode, offer, Options, CancellationToken.None));
+    }
+
+    /// <summary>The driver-key flow: no host, no setup code — the app opens its own session.</summary>
+    [RelayCommand]
+    private Task CreateWithKeyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(DriverKey))
+        {
+            ErrorMessage = "Paste a driver key first. Make one on the website under Driver keys.";
+            return Task.CompletedTask;
+        }
+
+        return ObtainAsync(
+            "Creating a session with your driver key…",
+            (session, client, offer) => session.CreateAsync(
+                client, DriverKey, ReplaceExistingSession, offer, Options, CancellationToken.None));
+    }
+
+    private async Task ObtainAsync(
+        string busyMessage,
+        Func<SessionManager, DriverClient, IReadOnlyList<MappedSchema>, Task<SetupResponse>> obtain)
+    {
+        ErrorMessage = null;
+
+        var chosen = ChosenOffer(out var problem);
+        if (chosen is null)
+        {
+            ErrorMessage = problem;
             return;
         }
 
@@ -235,7 +302,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         IsBusy = true;
-        StatusMessage = "Claiming the session…";
+        StatusMessage = busyMessage;
 
         try
         {
@@ -243,14 +310,13 @@ public partial class MainViewModel : ViewModelBase
             Subscribe(session);
 
             var client = new DriverClient(new System.Net.Http.HttpClient(), baseUri);
-            var response = await session.ClaimAsync(
-                client, SetupCode, chosen, GameName, MinPlayers, MaxPlayers, CancellationToken.None);
+            var response = await obtain(session, client, chosen);
 
             _session = session;
             JoinCode = response.JoinCode;
             JoinUrl = response.JoinUrl;
             JoinQr = response.JoinUrl is null ? null : QrRenderer.Render(response.JoinUrl);
-            StatusMessage = "Session claimed. Share the join code.";
+            StatusMessage = "Session ready. Share the join code.";
 
             Remember(response.DriverToken, chosen);
         }
@@ -261,7 +327,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            ErrorMessage = "Something went wrong claiming the session: " + ex.Message;
+            ErrorMessage = "Something went wrong obtaining the session: " + ex.Message;
             StatusMessage = "Ready.";
         }
         finally
@@ -289,6 +355,22 @@ public partial class MainViewModel : ViewModelBase
     {
         if (_session is null) return;
         await _session.ResumeAsync(CancellationToken.None);
+    }
+
+    /// <summary>Ends the round, not the session: back to the lobby for a fresh ready-up.</summary>
+    [RelayCommand]
+    private async Task ReturnToLobbyAsync()
+    {
+        if (_session is null) return;
+        await _session.ReturnToLobbyAsync(CancellationToken.None);
+        StatusMessage = "Back in the lobby. Players ready up again for the next round.";
+    }
+
+    [RelayCommand]
+    private async Task KickAsync(string? playerId)
+    {
+        if (_session is null || playerId is null) return;
+        await _session.KickAsync(playerId, CancellationToken.None);
     }
 
     [RelayCommand]
@@ -433,6 +515,9 @@ public partial class MainViewModel : ViewModelBase
         _settings.BaseUrl = BaseUrl;
         _settings.DriverToken = driverToken;
         _settings.RumbleEnabled = RumbleEnabled;
+        _settings.AllowLateJoin = AllowLateJoin;
+        _settings.DriverKey = string.IsNullOrWhiteSpace(DriverKey) ? null : DriverKey.Trim();
+        _settings.ReplaceExistingSession = ReplaceExistingSession;
         _settings.LastSchemaIds = chosen.Select(c => c.Schema.Id).ToList();
         PortableStorage.Save(_settings);
     }
@@ -446,6 +531,7 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanStart));
         OnPropertyChanged(nameof(CanPause));
         OnPropertyChanged(nameof(CanResume));
+        OnPropertyChanged(nameof(CanReturnToLobby));
     }
 
     partial void OnDriverAvailableChanged(bool value) => OnPropertyChanged(nameof(CanStart));

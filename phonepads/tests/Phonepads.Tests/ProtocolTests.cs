@@ -209,3 +209,156 @@ public class DriverCommandTests
         Assert.Contains("\"vibrateMs\":200", json);
     }
 }
+
+public class ProtocolV1Tests
+{
+    [Fact]
+    public void A_bare_number_is_an_analog_amount()
+    {
+        var value = ControlValue.FromJson(JsonDocument.Parse("0.75").RootElement);
+
+        Assert.Equal(ControlValueKind.Number, value.Kind);
+        Assert.Equal(0.75, value.Value, 6);
+    }
+
+    [Fact]
+    public void An_amount_is_clamped_to_the_unit_range()
+    {
+        Assert.Equal(1, ControlValue.Number(3).Value);
+        Assert.Equal(0, ControlValue.Number(-1).Value);
+    }
+
+    [Fact]
+    public void Parses_a_real_gamepad_frame_by_shape()
+    {
+        const string json = """
+        {
+          "type": "input", "playerId": "p1", "seq": 1789471234922,
+          "controls": {
+            "left-stick":  { "x": 0.4, "y": -0.9 },
+            "right-stick": { "x": 0,   "y": 0 },
+            "dpad": "ur",
+            "a": true,  "b": false, "x": false, "y": false,
+            "lb": false, "rb": true,
+            "lt": 0, "rt": 0.75,
+            "back": false, "start": false,
+            "ls": false, "rs": false,
+            "home": false
+          }
+        }
+        """;
+
+        var message = JsonSerializer.Deserialize(json, ProtocolJson.Default.ServerMessage)!;
+        var controls = message.ReadControls();
+
+        Assert.Equal(1789471234922, message.Seq);
+        Assert.Equal(16, controls.Count);
+        Assert.Equal(ControlValueKind.Axes, controls["left-stick"].Kind);
+        Assert.Equal(DpadDirection.UpRight, controls["dpad"].Dpad);
+        Assert.Equal(ControlValueKind.Number, controls["lt"].Kind);
+        Assert.Equal(0, controls["lt"].Value);
+        Assert.Equal(0.75, controls["rt"].Value, 6);
+        Assert.True(controls["rb"].Pressed);
+    }
+
+    [Fact]
+    public void A_snapshot_carries_the_protocol_version_and_driver_presence()
+    {
+        var snapshot = SessionSnapshot.FromJson(JsonDocument.Parse(
+            """{ "protocolVersion": 1, "state": "paused", "driverConnected": false, "players": [] }""").RootElement);
+
+        Assert.Equal(1, snapshot.ProtocolVersion);
+        Assert.False(snapshot.DriverConnected);
+        Assert.Equal("paused", snapshot.State);
+    }
+
+    [Fact]
+    public void An_older_snapshot_without_the_new_fields_still_parses()
+    {
+        var snapshot = SessionSnapshot.FromJson(JsonDocument.Parse("""{ "state": "in_progress" }""").RootElement);
+
+        Assert.Equal(0, snapshot.ProtocolVersion);
+        Assert.True(snapshot.DriverConnected);
+    }
+
+    [Fact]
+    public void The_socket_uri_prefers_wsUrl_and_falls_back_to_wsPath()
+    {
+        var https = new Uri("https://example.test");
+
+        Assert.Equal(
+            "wss://gamepad.test/api/gamepad/ws?role=driver&token=t",
+            new SetupResponse { WsUrl = "wss://gamepad.test/api/gamepad/ws?role=driver&token=t", WsPath = "/x" }.SocketUri(https)!.ToString());
+        Assert.Equal(
+            "wss://example.test/api/gamepad/ws?token=t",
+            new SetupResponse { WsPath = "/api/gamepad/ws?token=t" }.SocketUri(https)!.ToString());
+        Assert.Equal(
+            "ws://localhost:3000/ws",
+            new SetupResponse { WsPath = "/ws" }.SocketUri(new Uri("http://localhost:3000"))!.ToString());
+        Assert.Null(new SetupResponse().SocketUri(https));
+    }
+
+    [Fact]
+    public void A_version_refusal_lists_what_the_server_supports()
+    {
+        var parsed = JsonSerializer.Deserialize(
+            """{ "success": false, "error": "Unsupported protocol version", "supported": [2, 3] }""",
+            ProtocolJson.Default.SetupResponse)!;
+
+        Assert.False(parsed.Success);
+        Assert.Equal([2, 3], parsed.Supported);
+    }
+
+    [Fact]
+    public void The_setup_request_pins_the_protocol_version()
+    {
+        var json = JsonSerializer.Serialize(
+            new SetupRequest { SetupCode = "ABC234", ProtocolVersion = DriverClient.ProtocolVersion },
+            ProtocolJson.Default.SetupRequest);
+
+        Assert.Contains("\"protocolVersion\":1", json);
+    }
+
+    [Fact]
+    public void The_create_request_carries_the_replace_flag_and_config()
+    {
+        var json = JsonSerializer.Serialize(
+            new CreateRequest
+            {
+                ProtocolVersion = 1,
+                ReplaceExisting = true,
+                Config = new SessionConfig { AllowPhysicalGamepad = true, DriverAppUuid = "u" },
+            },
+            ProtocolJson.Default.CreateRequest);
+
+        Assert.Contains("\"replaceExisting\":true", json);
+        Assert.Contains("\"allowPhysicalGamepad\":true", json);
+        Assert.Contains("\"driverAppUuid\":\"u\"", json);
+        Assert.DoesNotContain("allowLateJoin", json); // unset flags stay off the wire
+    }
+
+    [Theory]
+    [InlineData("lobby", null, null, """{"type":"lobby"}""")]
+    [InlineData("kick", "p1", null, """{"type":"kick","playerId":"p1"}""")]
+    [InlineData("set_schema", "p1", "on-foot", """{"type":"set_schema","playerId":"p1","schemaId":"on-foot"}""")]
+    [InlineData("set_schema", null, "menu", """{"type":"set_schema","schemaId":"menu"}""")]
+    [InlineData("ping", null, null, """{"type":"ping"}""")]
+    public void Serialises_the_new_commands(string type, string? playerId, string? schemaId, string expected)
+    {
+        var json = JsonSerializer.Serialize(
+            new DriverCommand { Type = type, PlayerId = playerId, SchemaId = schemaId },
+            ProtocolJson.Default.DriverCommand);
+
+        Assert.Equal(expected, json);
+    }
+
+    [Fact]
+    public void Serialises_a_text_message()
+    {
+        var json = JsonSerializer.Serialize(
+            new DriverCommand { Type = "message", Payload = new MessagePayload { Text = "You are Red" } },
+            ProtocolJson.Default.DriverCommand);
+
+        Assert.Equal("""{"type":"message","payload":{"text":"You are Red"}}""", json);
+    }
+}

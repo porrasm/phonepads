@@ -13,15 +13,27 @@ public enum ControlType
     /// own motion processing — in practice, emulating a Wii Remote.
     /// </summary>
     Motion,
+    /// <summary>
+    /// An analog trigger reporting 0..1. Only a real gamepad bridged through the phone has
+    /// one; a touch layout cannot declare it, so it never goes to the service.
+    /// </summary>
+    Trigger,
 }
 
 /// <summary>How a joystick or gyro reports its value; drives which targets make sense.</summary>
 public enum ControlMode
 {
+    /// <summary>A round pad reporting {x, y}; the knob springs back to a fixed centre.</summary>
     Full,
     XOnly,
     YOnly,
     Dpad,
+    /// <summary>
+    /// A square pad reporting {x, y} with no fixed centre: wherever the thumb lands is zero,
+    /// and the drag may leave the pad. Same value shape as Full, so mappings never notice.
+    /// Meant for aiming and cameras; walking is usually still Full.
+    /// </summary>
+    Relative,
 }
 
 public enum ControlZone
@@ -74,12 +86,15 @@ public sealed record SchemaControl
     /// <summary>True when the control needs the phone's motion sensors at all.</summary>
     public bool NeedsSensors => Type is ControlType.Gyro or ControlType.Motion;
 
+    /// <summary>True for the analog trigger of a real gamepad, which only exists off-wire.</summary>
+    public bool IsTrigger => Type == ControlType.Trigger;
+
     public ControlDto ToDto() => new()
     {
         Type = Type switch
         {
             ControlType.Joystick => "joystick",
-            ControlType.Button => "button",
+            ControlType.Button or ControlType.Trigger => "button",
             ControlType.Motion => "motion",
             _ => "gyro",
         },
@@ -90,8 +105,9 @@ public sealed record SchemaControl
             ControlMode.XOnly => "x",
             ControlMode.YOnly => "y",
             ControlMode.Dpad => "dpad",
+            ControlMode.Relative => "relative",
             // "full" is the default; it means nothing for a button or the sensor stream.
-            _ => Type is ControlType.Button or ControlType.Motion ? null : "full",
+            _ => Type is ControlType.Button or ControlType.Trigger or ControlType.Motion ? null : "full",
         },
         // Sensors take no space in the layout, so hints would only confuse the phone.
         Zone = IsMotion ? null : Zone switch
@@ -120,6 +136,13 @@ public sealed record SchemaControl
 /// </summary>
 public sealed record Schema
 {
+    /// <summary>
+    /// The id the service reserves for a real controller paired with the phone. It is never
+    /// declared in a config — "allowPhysicalGamepad" offers it — but a player who picks it
+    /// reports this id, and no touch layout may use it.
+    /// </summary>
+    public const string PhysicalGamepadId = "physical-gamepad";
+
     public required string Id { get; init; }
     public required string Name { get; init; }
     public SchemaOrientation Orientation { get; init; } = SchemaOrientation.Auto;
@@ -127,6 +150,12 @@ public sealed record Schema
 
     /// <summary>Bundled presets are read-only; editing one produces a copy (SCHEMA-1).</summary>
     public bool IsPreset { get; init; }
+
+    /// <summary>
+    /// True for the built-in description of a bridged real gamepad. It is offered with a
+    /// config flag rather than sent as a layout, and the phone decides its control set.
+    /// </summary>
+    public bool IsPhysicalGamepad => Id == PhysicalGamepadId;
 
     /// <summary>True when any control needs motion sensors, which not every phone has.</summary>
     public bool RequiresGyro => Controls.Any(c => c.NeedsSensors);
@@ -155,8 +184,14 @@ public sealed record Schema
     {
         var problems = new List<string>();
 
+        // The real-gamepad description never goes on the wire, so the wire rules do not apply.
+        if (IsPhysicalGamepad) return problems;
+
         if (Controls.Count is < 1 or > 16)
             problems.Add($"A schema needs 1 to 16 controls; '{Name}' has {Controls.Count}.");
+
+        foreach (var control in Controls.Where(c => c.IsTrigger))
+            problems.Add($"Control '{control.Id}' is an analog trigger, which only a real gamepad has; a phone layout cannot declare one.");
 
         var duplicates = Controls
             .GroupBy(c => c.Id, StringComparer.Ordinal)

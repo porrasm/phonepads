@@ -409,3 +409,43 @@ public class PadStateTests
         Assert.Equal(PadButtons.None, neutral.Buttons);
     }
 }
+
+public class ProtocolV1SchemaTests
+{
+    [Fact]
+    public void A_relative_pad_goes_on_the_wire_as_relative()
+    {
+        var dto = new SchemaControl { Id = "look", Type = ControlType.Joystick, Mode = ControlMode.Relative }.ToDto();
+
+        Assert.Equal("joystick", dto.Type);
+        Assert.Equal("relative", dto.Mode);
+    }
+
+    [Fact]
+    public void The_real_gamepad_description_is_exempt_from_wire_rules()
+    {
+        Assert.True(PhysicalGamepad.Schema.IsPhysicalGamepad);
+        Assert.Empty(PhysicalGamepad.Schema.Validate());
+        Assert.Empty(PhysicalGamepad.DefaultMapping.Review(PhysicalGamepad.Schema).UnmappedControls);
+    }
+
+    [Fact]
+    public void A_phone_layout_cannot_declare_an_analog_trigger()
+    {
+        var schema = new Schema
+        {
+            Id = "custom",
+            Name = "Custom",
+            Controls = [new SchemaControl { Id = "lt", Type = ControlType.Trigger }],
+        };
+
+        Assert.Contains(schema.Validate(), p => p.Contains("analog trigger"));
+    }
+
+    [Fact]
+    public void Every_bundled_preset_is_valid()
+    {
+        foreach (var preset in Presets.All)
+            Assert.Empty(preset.Schema.Validate());
+    }
+}

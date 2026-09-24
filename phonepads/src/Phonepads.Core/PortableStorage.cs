@@ -9,8 +9,20 @@ public sealed class AppSettings
     [JsonPropertyName("baseUrl")] public string BaseUrl { get; set; } = "https://gamepad.porras.club";
     [JsonPropertyName("gameName")] public string? GameName { get; set; }
     [JsonPropertyName("driverToken")] public string? DriverToken { get; set; }
+
+    /// <summary>
+    /// A driver key (gpk_…) issued on the website, which lets the app open sessions without
+    /// a setup code. Stored as typed: this file lives beside the executable, so anyone with
+    /// the folder has the key. The owner can revoke it on the website at any time.
+    /// </summary>
+    [JsonPropertyName("driverKey")] public string? DriverKey { get; set; }
+
+    /// <summary>When creating with a driver key, end the owner's existing session first instead of failing.</summary>
+    [JsonPropertyName("replaceExistingSession")] public bool ReplaceExistingSession { get; set; }
+
     [JsonPropertyName("lastSchemaIds")] public List<string> LastSchemaIds { get; set; } = [];
     [JsonPropertyName("rumbleEnabled")] public bool RumbleEnabled { get; set; } = true;
+    [JsonPropertyName("allowLateJoin")] public bool AllowLateJoin { get; set; }
 
     /// <summary>UDP port of the DSU server that Dolphin connects to for Wii Remote mode.</summary>
     [JsonPropertyName("dsuPort")] public int DsuPort { get; set; } = 26760;

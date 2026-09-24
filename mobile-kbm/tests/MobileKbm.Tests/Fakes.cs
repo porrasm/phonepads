@@ -65,7 +65,15 @@ public sealed class FakeConnection(Action<FakeConnection> onRunning) : ISessionC
 
     public Task EndAsync(CancellationToken ct) => Record("end");
 
+    public Task LobbyAsync(CancellationToken ct) => Record("lobby");
+
+    public Task KickAsync(string playerId, CancellationToken ct) => Record("kick");
+
+    public Task SetSchemaAsync(string? playerId, string schemaId, CancellationToken ct) => Record("set_schema");
+
     public Task VibrateAsync(string playerId, int milliseconds, CancellationToken ct) => Task.CompletedTask;
+
+    public Task ShowTextAsync(string? playerId, string text, CancellationToken ct) => Task.CompletedTask;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

@@ -14,6 +14,11 @@ public enum ControlValueKind
     Button,
     /// <summary>Raw touch or touchpad: every finger that is down, possibly none.</summary>
     Touches,
+    /// <summary>
+    /// A bare number in [0, 1]: the analog triggers of a real gamepad bridged through the
+    /// phone. Touch layouts never send this shape.
+    /// </summary>
+    Number,
 }
 
 /// <summary>
@@ -37,8 +42,9 @@ public enum DpadDirection
 }
 
 /// <summary>
-/// One control's value inside an input frame. The protocol sends four different JSON
-/// shapes under the same key, so this is the union of them.
+/// One control's value inside an input frame. The protocol sends several different JSON
+/// shapes under the same key — and the same id can change shape between layouts — so this
+/// is the union of them, read by shape rather than by id.
 /// </summary>
 public readonly record struct ControlValue
 {
@@ -64,6 +70,9 @@ public readonly record struct ControlValue
 
     private readonly IReadOnlyList<TouchPoint>? _touches;
 
+    /// <summary>Analog amount in [0, 1]. Only meaningful when Kind is Number.</summary>
+    public double Value { get; init; }
+
     public static ControlValue Axes(double x, double y) =>
         new() { Kind = ControlValueKind.Axes, X = x, Y = y };
 
@@ -76,10 +85,13 @@ public readonly record struct ControlValue
     public static ControlValue Fingers(IReadOnlyList<TouchPoint> touches) =>
         new() { Kind = ControlValueKind.Touches, Touches = touches };
 
+    public static ControlValue Number(double value) =>
+        new() { Kind = ControlValueKind.Number, Value = Math.Clamp(value, 0d, 1d) };
+
     /// <summary>
     /// Reads a control value from its JSON form: an object for axes, a string for a dpad
-    /// code, a boolean for a button, an array of fingers for raw touch and touchpads.
-    /// Anything else yields <see cref="ControlValueKind.None"/>.
+    /// code, a boolean for a button, an array of fingers for raw touch and touchpads, a
+    /// number for an analog trigger. Anything else yields <see cref="ControlValueKind.None"/>.
     /// </summary>
     public static ControlValue FromJson(JsonElement element) => element.ValueKind switch
     {
@@ -87,6 +99,7 @@ public readonly record struct ControlValue
         JsonValueKind.String => DpadAt(ParseDpad(element.GetString())),
         JsonValueKind.Object => Axes(ReadAxis(element, "x"), ReadAxis(element, "y")),
         JsonValueKind.Array => Fingers(ReadTouches(element)),
+        JsonValueKind.Number => Number(element.GetDouble()),
         _ => default,
     };
 

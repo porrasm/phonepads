@@ -334,3 +334,74 @@ public class MappingEngineTests
         Assert.Equal(PadState.Neutral, state);
     }
 }
+
+public class AnalogTriggerMappingTests
+{
+    private static Schema SchemaWith(params SchemaControl[] controls) => new()
+    {
+        Id = "test-schema",
+        Name = "Test",
+        Controls = controls,
+    };
+
+    private static Mapping MappingOf(params (string Id, PadTarget Target)[] entries) => new()
+    {
+        SchemaId = "test-schema",
+        Controls = entries.ToDictionary(
+            e => e.Id,
+            e => new ControlMapping { Target = e.Target },
+            StringComparer.Ordinal),
+    };
+
+    private static SchemaControl Trigger(string id) => new() { Id = id, Type = ControlType.Trigger };
+
+    [Fact]
+    public void An_amount_on_a_trigger_target_passes_through()
+    {
+        var state = MappingEngine.Apply(
+            SchemaWith(Trigger("rt")),
+            MappingOf(("rt", PadTarget.RightTrigger)),
+            new Dictionary<string, ControlValue> { ["rt"] = ControlValue.Number(0.5) });
+
+        Assert.Equal(PadState.ToTrigger(0.5), state.RightTrigger);
+        Assert.Equal(0, state.LeftTrigger);
+    }
+
+    [Fact]
+    public void An_amount_on_a_button_target_presses_past_half()
+    {
+        var schema = SchemaWith(Trigger("rt"));
+        var mapping = MappingOf(("rt", PadTarget.A));
+
+        var light = MappingEngine.Apply(schema, mapping, new Dictionary<string, ControlValue> { ["rt"] = ControlValue.Number(0.2) });
+        var firm = MappingEngine.Apply(schema, mapping, new Dictionary<string, ControlValue> { ["rt"] = ControlValue.Number(0.8) });
+
+        Assert.False(light.IsPressed(PadButtons.A));
+        Assert.True(firm.IsPressed(PadButtons.A));
+    }
+
+    [Fact]
+    public void An_amount_on_an_axis_target_is_a_one_way_deflection()
+    {
+        var state = MappingEngine.Apply(
+            SchemaWith(Trigger("rt")),
+            MappingOf(("rt", PadTarget.RightStickY)),
+            new Dictionary<string, ControlValue> { ["rt"] = ControlValue.Number(1) });
+
+        Assert.Equal(short.MaxValue, state.RightStickY);
+    }
+
+    [Fact]
+    public void The_same_id_can_be_a_button_in_one_frame_and_an_amount_in_another()
+    {
+        // "Read values by shape, not by id": a touch layout sends lt as a boolean, a real pad as a number.
+        var schema = SchemaWith(Trigger("lt"));
+        var mapping = MappingOf(("lt", PadTarget.LeftTrigger));
+
+        var touch = MappingEngine.Apply(schema, mapping, new Dictionary<string, ControlValue> { ["lt"] = ControlValue.Button(true) });
+        var real = MappingEngine.Apply(schema, mapping, new Dictionary<string, ControlValue> { ["lt"] = ControlValue.Number(0.25) });
+
+        Assert.Equal(255, touch.LeftTrigger);
+        Assert.Equal(PadState.ToTrigger(0.25), real.LeftTrigger);
+    }
+}

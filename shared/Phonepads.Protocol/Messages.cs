@@ -8,8 +8,8 @@ namespace Phonepads.Protocol;
 public sealed class SetupRequest
 {
     [JsonPropertyName("setupCode")] public required string SetupCode { get; init; }
-    [JsonPropertyName("config")] public SessionConfig? Config { get; init; }
     [JsonPropertyName("protocolVersion")] public int? ProtocolVersion { get; init; }
+    [JsonPropertyName("config")] public SessionConfig? Config { get; init; }
 }
 
 /// <summary>Body of <c>POST /api/gamepad/driver/create</c>, authenticated with a driver key.</summary>
@@ -25,13 +25,25 @@ public sealed class CreateRequest
 public sealed class SessionConfig
 {
     [JsonPropertyName("game")] public string? Game { get; init; }
+
+    /// <summary>
+    /// A UUID generated once and shipped with the game. Phones file the layouts players edit
+    /// under it, so the same value on every setup makes those edits survive between sessions.
+    /// </summary>
+    [JsonPropertyName("driverAppUuid")] public string? DriverAppUuid { get; init; }
+
     [JsonPropertyName("minPlayers")] public int? MinPlayers { get; init; }
     [JsonPropertyName("maxPlayers")] public int? MaxPlayers { get; init; }
-    [JsonPropertyName("schemas")] public List<SchemaDto>? Schemas { get; init; }
-    [JsonPropertyName("colors")] public List<string>? Colors { get; init; }
 
-    /// <summary>A UUID the driver ships with; phones file players' edited layouts under it.</summary>
-    [JsonPropertyName("driverAppUuid")] public string? DriverAppUuid { get; init; }
+    /// <summary>Adds the "Real gamepad" option: a controller paired with the phone, relayed as-is.</summary>
+    [JsonPropertyName("allowPhysicalGamepad")] public bool? AllowPhysicalGamepad { get; init; }
+
+    /// <summary>Lets players join while the game runs or is paused.</summary>
+    [JsonPropertyName("allowLateJoin")] public bool? AllowLateJoin { get; init; }
+
+    [JsonPropertyName("schemas")] public List<SchemaDto>? Schemas { get; init; }
+    [JsonPropertyName("capabilities")] public List<string>? Capabilities { get; init; }
+    [JsonPropertyName("colors")] public List<string>? Colors { get; init; }
 
     /// <summary>Invite-only: the join code stops working and only the owner (and linked emails) can join.</summary>
     [JsonPropertyName("private")] public bool? Private { get; init; }
@@ -76,16 +88,40 @@ public sealed class SetupResponse
     [JsonPropertyName("joinCode")] public string? JoinCode { get; init; }
     [JsonPropertyName("joinUrl")] public string? JoinUrl { get; init; }
     [JsonPropertyName("driverToken")] public string? DriverToken { get; init; }
+
+    /// <summary>The absolute WebSocket address to connect to. Preferred over <see cref="WsPath"/>.</summary>
+    [JsonPropertyName("wsUrl")] public string? WsUrl { get; init; }
+
+    /// <summary>The same address relative to the service host, for a driver with its own base URL.</summary>
     [JsonPropertyName("wsPath")] public string? WsPath { get; init; }
+
     [JsonPropertyName("metadata")] public string? Metadata { get; init; }
     [JsonPropertyName("error")] public string? Error { get; init; }
+
+    /// <summary>The protocol versions the server speaks, sent with an "Unsupported protocol version" refusal.</summary>
+    [JsonPropertyName("supported")] public List<int>? Supported { get; init; }
+
+    /// <summary>
+    /// Where to open the session socket: <see cref="WsUrl"/> when the service sent one, else
+    /// <see cref="WsPath"/> against the base the setup call went to. Null when neither is usable.
+    /// </summary>
+    public Uri? SocketUri(Uri baseUri)
+    {
+        if (!string.IsNullOrEmpty(WsUrl) && Uri.TryCreate(WsUrl, UriKind.Absolute, out var absolute))
+            return absolute;
+        if (string.IsNullOrEmpty(WsPath)) return null;
+
+        var scheme = baseUri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws";
+        return new Uri(scheme + "://" + baseUri.Authority + WsPath);
+    }
 }
 
 // ---- Session (WebSocket) ----
 
 /// <summary>
-/// A server message, parsed only as far as its discriminator. Payload shapes differ per
-/// type and the protocol is still in beta, so the rest is read lazily from <see cref="Raw"/>.
+/// A server message, parsed only as far as its discriminator plus the flat fields the event
+/// types share. Payload shapes differ per type, so the nested parts stay raw JSON and are
+/// read lazily. Unknown fields and types are additions, never errors, and are ignored.
 /// </summary>
 public sealed class ServerMessage
 {
@@ -103,7 +139,7 @@ public sealed class ServerMessage
     [JsonPropertyName("controls")] public JsonElement Controls { get; init; }
     [JsonPropertyName("samples")] public JsonElement Samples { get; init; }
 
-    /// <summary>Control values of an input frame, decoded from their three JSON shapes.</summary>
+    /// <summary>Control values of an input frame, decoded by shape rather than by id.</summary>
     public Dictionary<string, ControlValue> ReadControls()
     {
         var result = new Dictionary<string, ControlValue>(StringComparer.Ordinal);
@@ -176,8 +212,8 @@ public sealed record PlayerInfo(
     bool Connected)
 {
     /// <summary>
-    /// Reads a player object defensively: the service is in beta and spells the schema
-    /// and connection fields more than one way across its docs.
+    /// Reads a player object, tolerating missing fields: a player_* event may carry less
+    /// than the snapshot does, and later protocol versions may add fields.
     /// </summary>
     public static PlayerInfo? FromJson(JsonElement element)
     {
@@ -205,14 +241,25 @@ public sealed record PlayerInfo(
             : null;
 }
 
-/// <summary>The session snapshot sent on connect and on every reconnect.</summary>
-public sealed record SessionSnapshot(string State, IReadOnlyList<PlayerInfo> Players)
+/// <summary>The session snapshot sent on connect and on every reconnect. Authoritative; events patch it.</summary>
+public sealed record SessionSnapshot(
+    string State,
+    IReadOnlyList<PlayerInfo> Players,
+    int ProtocolVersion = 0,
+    bool DriverConnected = true)
 {
     public static SessionSnapshot FromJson(JsonElement element)
     {
         var state = element.TryGetProperty("state", out var s) && s.ValueKind == JsonValueKind.String
             ? s.GetString() ?? "unknown"
             : "unknown";
+
+        var version = element.TryGetProperty("protocolVersion", out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetInt32()
+            : 0;
+
+        var driverConnected = !element.TryGetProperty("driverConnected", out var d)
+            || d.ValueKind != JsonValueKind.False;
 
         var players = new List<PlayerInfo>();
         if (element.TryGetProperty("players", out var list) && list.ValueKind == JsonValueKind.Array)
@@ -223,23 +270,32 @@ public sealed record SessionSnapshot(string State, IReadOnlyList<PlayerInfo> Pla
             }
         }
 
-        return new SessionSnapshot(state, players);
+        return new SessionSnapshot(state, players, version, driverConnected);
     }
 }
 
-/// <summary>Commands the driver sends. Only the driver may start, pause, resume and end.</summary>
+/// <summary>
+/// Commands the driver sends: start, pause, resume, end, lobby, ping, and the targeted ones —
+/// message (payload), set_schema (schemaId) and kick — which name one player or, for the
+/// first two, omit playerId to reach everyone.
+/// </summary>
 public sealed class DriverCommand
 {
     [JsonPropertyName("type")] public required string Type { get; init; }
     [JsonPropertyName("playerId")] public string? PlayerId { get; init; }
+    [JsonPropertyName("schemaId")] public string? SchemaId { get; init; }
     [JsonPropertyName("payload")] public MessagePayload? Payload { get; init; }
 }
 
 /// <summary>
-/// Payload of a "message" command. Only the vibrate form is modelled; the service passes
-/// any other payload through to the player client untouched.
+/// Payload of a "message" command: the two shapes the phone understands. Both are optional
+/// and combinable; the service relays anything else untouched.
 /// </summary>
 public sealed class MessagePayload
 {
+    /// <summary>Buzz the phone (the phone caps it at one second). A bridged real controller rumbles instead.</summary>
     [JsonPropertyName("vibrateMs")] public int? VibrateMs { get; init; }
+
+    /// <summary>A line shown above the controls for a few seconds; up to 64 characters (it expires on its own).</summary>
+    [JsonPropertyName("text")] public string? Text { get; init; }
 }

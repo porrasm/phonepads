@@ -30,7 +30,7 @@ public class SessionManagerTests
                 [PadBackend.WiiRemote] = Dsu,
             };
 
-            Session = new SessionManager(hubs, (_, _) => Connection);
+            Session = new SessionManager(hubs, _ => Connection);
             Session.Notice += Notices.Add;
             Session.PhaseChanged += Phases.Add;
             Session.PadUpdated += (id, state) => PadUpdates.Add((id, state));
@@ -389,19 +389,169 @@ public class SessionManagerTests
             new Schema { Id = "broken", Name = "Broken", Controls = [] },
             Mapping.Empty("broken"));
         var hubs = new Dictionary<PadBackend, IVirtualPadHub> { [PadBackend.XInput] = new FakeHub(PadBackend.XInput) };
-        var session = new SessionManager(hubs, (_, _) => new FakeConnection());
+        var session = new SessionManager(hubs, _ => new FakeConnection());
 
         Assert.Throws<SetupException>(() =>
             session.Attach(new Uri("https://example.test"), new SetupResponse(), [broken]));
     }
 
     [Fact]
-    public void Offering_more_than_four_schemas_is_refused()
+    public void Offering_more_schemas_than_the_service_takes_is_refused()
     {
         var hubs = new Dictionary<PadBackend, IVirtualPadHub> { [PadBackend.XInput] = new FakeHub(PadBackend.XInput) };
-        var session = new SessionManager(hubs, (_, _) => new FakeConnection());
+        var session = new SessionManager(hubs, _ => new FakeConnection());
+        var tooMany = Enumerable.Range(0, SessionManager.MaxSchemas + 1)
+            .Select(i => Xbox with { Schema = Xbox.Schema with { Id = $"layout-{i}" } })
+            .ToList();
 
         Assert.Throws<ArgumentException>(() =>
-            session.Attach(new Uri("https://example.test"), new SetupResponse(), Presets.All.Take(5).ToList()));
+            session.Attach(new Uri("https://example.test"), new SetupResponse { WsPath = "/ws" }, tooMany));
+    }
+
+    [Fact]
+    public void Offering_only_a_real_gamepad_is_refused()
+    {
+        var hubs = new Dictionary<PadBackend, IVirtualPadHub> { [PadBackend.XInput] = new FakeHub(PadBackend.XInput) };
+        var session = new SessionManager(hubs, _ => new FakeConnection());
+
+        Assert.Throws<ArgumentException>(() =>
+            session.Attach(new Uri("https://example.test"), new SetupResponse { WsPath = "/ws" }, [PhysicalGamepad.Mapped]));
+    }
+
+    [Fact]
+    public void The_socket_address_comes_from_wsUrl_when_the_service_sends_one()
+    {
+        Uri? connectedTo = null;
+        var hubs = new Dictionary<PadBackend, IVirtualPadHub> { [PadBackend.XInput] = new FakeHub(PadBackend.XInput) };
+        var session = new SessionManager(hubs, uri => { connectedTo = uri; return new FakeConnection(); });
+
+        session.Attach(
+            new Uri("https://example.test"),
+            new SetupResponse { WsUrl = "wss://elsewhere.test/api/gamepad/ws?role=driver&token=t", WsPath = "/ignored" },
+            [Xbox]);
+
+        Assert.Equal("wss://elsewhere.test/api/gamepad/ws?role=driver&token=t", connectedTo?.ToString());
+    }
+
+    // ---- Protocol v1 additions ----
+
+    [Fact]
+    public void The_config_offers_real_gamepads_with_a_flag_rather_than_a_layout()
+    {
+        var config = SessionManager.BuildConfig([Xbox, PhysicalGamepad.Mapped], new SessionOptions { AllowLateJoin = true });
+
+        Assert.True(config.AllowPhysicalGamepad);
+        Assert.True(config.AllowLateJoin);
+        Assert.Equal(SessionManager.DriverAppUuid, config.DriverAppUuid);
+        Assert.Equal(["generic-gamepad"], config.Schemas!.Select(s => s.Id));
+    }
+
+    [Fact]
+    public void Without_a_real_gamepad_on_offer_the_flags_stay_off_the_wire()
+    {
+        var config = SessionManager.BuildConfig([Xbox], new SessionOptions());
+
+        Assert.Null(config.AllowPhysicalGamepad);
+        Assert.Null(config.AllowLateJoin);
+    }
+
+    [Fact]
+    public async Task A_real_gamepad_drives_an_xbox_pad_one_to_one()
+    {
+        var rig = new Rig(offered: [Xbox, PhysicalGamepad.Mapped]);
+        await rig.JoinAndStart(Rig.Player("ada", Schema.PhysicalGamepadId));
+
+        rig.Connection.RaiseInput("ada", 1789471234922, new Dictionary<string, ControlValue>
+        {
+            ["left-stick"] = ControlValue.Axes(0.4, -0.9),
+            ["right-stick"] = ControlValue.Axes(0, 0),
+            ["dpad"] = ControlValue.DpadAt(DpadDirection.UpRight),
+            ["a"] = ControlValue.Button(true),
+            ["b"] = ControlValue.Button(false),
+            ["x"] = ControlValue.Button(false),
+            ["y"] = ControlValue.Button(false),
+            ["lb"] = ControlValue.Button(false),
+            ["rb"] = ControlValue.Button(true),
+            ["lt"] = ControlValue.Number(0),
+            ["rt"] = ControlValue.Number(0.75),
+            ["back"] = ControlValue.Button(false),
+            ["start"] = ControlValue.Button(false),
+            ["ls"] = ControlValue.Button(false),
+            ["rs"] = ControlValue.Button(false),
+            ["home"] = ControlValue.Button(false),
+        });
+
+        var state = Assert.Single(rig.XInput.At(0)!.Updates);
+        Assert.Equal(PadState.ToAxis(0.4), state.LeftStickX);
+        Assert.Equal(PadState.ToAxis(0.9), state.LeftStickY); // y flipped: up on the stick is up
+        Assert.True(state.IsPressed(PadButtons.A));
+        Assert.True(state.IsPressed(PadButtons.RightBumper));
+        Assert.True(state.IsPressed(PadButtons.DpadUp | PadButtons.DpadRight));
+        Assert.Equal(0, state.LeftTrigger);
+        Assert.Equal(PadState.ToTrigger(0.75), state.RightTrigger);
+    }
+
+    [Fact]
+    public async Task A_refused_start_drops_back_to_the_lobby_instead_of_ending_the_session()
+    {
+        var rig = new Rig();
+        await rig.JoinAndStart(Rig.Player("ada", "generic-gamepad", ready: false));
+
+        rig.Connection.RaiseError("cannot_start", "Not everyone is ready");
+
+        Assert.Equal(SessionPhase.Lobby, rig.Session.Phase);
+        Assert.False(rig.Connection.Disposed);
+        Assert.Contains(rig.Notices, n => n.Contains("could not start"));
+    }
+
+    [Fact]
+    public async Task Returning_to_the_lobby_keeps_the_pads_but_releases_them()
+    {
+        var rig = new Rig();
+        await rig.JoinAndStart(Rig.Player("ada", "generic-gamepad"));
+
+        await rig.Session.ReturnToLobbyAsync(CancellationToken.None);
+
+        Assert.Equal(SessionPhase.Lobby, rig.Session.Phase);
+        Assert.Contains("lobby", rig.Connection.Commands);
+        var pad = rig.XInput.At(0)!;
+        Assert.Equal(1, pad.Resets);
+        Assert.False(pad.Disposed);
+        Assert.Equal(0, rig.Session.Players[0].Slot);
+    }
+
+    [Fact]
+    public async Task A_late_joiner_gets_a_pad_at_once()
+    {
+        var rig = new Rig();
+        await rig.JoinAndStart(Rig.Player("ada", "generic-gamepad"));
+
+        rig.Connection.RaisePlayerChanged(Rig.Player("bob", "generic-gamepad", ready: false));
+
+        Assert.NotNull(rig.XInput.At(1));
+    }
+
+    [Fact]
+    public async Task Kicking_asks_the_service_and_the_confirmation_frees_the_slot()
+    {
+        var rig = new Rig();
+        await rig.JoinAndStart(Rig.Player("ada", "generic-gamepad"));
+
+        await rig.Session.KickAsync("ada", CancellationToken.None);
+        Assert.Equal(["ada"], rig.Connection.Kicked);
+
+        rig.Connection.RaisePlayerLeft("ada");
+        Assert.Empty(rig.Session.Players);
+        Assert.True(rig.XInput.Created[0].Disposed);
+    }
+
+    [Fact]
+    public void A_snapshot_from_a_different_protocol_version_is_called_out()
+    {
+        var rig = new Rig();
+
+        rig.Connection.RaiseSnapshot("waiting_for_players", protocolVersion: 2);
+
+        Assert.Contains(rig.Notices, n => n.Contains("protocol version 2"));
     }
 }

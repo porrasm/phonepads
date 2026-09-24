@@ -16,12 +16,16 @@ public enum ConnectionStatus
 
 /// <summary>
 /// The driver side of a claimed session: receives the snapshot and every event, sends the
-/// lifecycle commands, and reconnects with backoff after a transient drop.
+/// lifecycle commands, keeps the socket alive through quiet lobbies, and reconnects with
+/// backoff after a transient drop.
 /// </summary>
-public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConnection
+public sealed class SessionConnection(Uri socketUri) : ISessionConnection
 {
-    /// <summary>Close codes the protocol defines as terminal — reconnecting would be pointless.</summary>
-    private static readonly HashSet<int> TerminalCloseCodes = [4000, 4001, 4004, 4005, 4008, 4010];
+    /// <summary>
+    /// Close codes the protocol defines as terminal — reconnecting would be pointless. 4011
+    /// (removed) is sent to kicked players, never the driver, but is listed for completeness.
+    /// </summary>
+    private static readonly HashSet<int> TerminalCloseCodes = [4000, 4001, 4004, 4005, 4008, 4010, 4011];
 
     /// <summary>
     /// How often to send an application-level ping. Proxies drop connections that carry no
@@ -63,7 +67,7 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
 
             try
             {
-                await socket.ConnectAsync(SocketUri(), ct);
+                await socket.ConnectAsync(socketUri, ct);
                 attempt = 0;
                 SetStatus(ConnectionStatus.Connected);
 
@@ -186,6 +190,7 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
 
         if (message?.Type is not { } type) return;
 
+        // Unknown types (and pong, driver_connected, driver_disconnected) fall through the switch.
         switch (type)
         {
             case "snapshot":
@@ -239,7 +244,7 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
                 // A refused command (invalid_state, cannot_start, …) — the session itself is fine.
                 ErrorReceived?.Invoke(
                     message.Code ?? "unknown",
-                    message.Message ?? message.Code ?? "The service reported an error.");
+                    message.Message ?? message.Code ?? "The service refused the last command.");
                 break;
         }
     }
@@ -252,12 +257,28 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
 
     public Task EndAsync(CancellationToken ct) => SendAsync(new DriverCommand { Type = "end" }, ct);
 
+    public Task LobbyAsync(CancellationToken ct) => SendAsync(new DriverCommand { Type = "lobby" }, ct);
+
+    public Task KickAsync(string playerId, CancellationToken ct) =>
+        SendAsync(new DriverCommand { Type = "kick", PlayerId = playerId }, ct);
+
+    public Task SetSchemaAsync(string? playerId, string schemaId, CancellationToken ct) =>
+        SendAsync(new DriverCommand { Type = "set_schema", PlayerId = playerId, SchemaId = schemaId }, ct);
+
     public Task VibrateAsync(string playerId, int milliseconds, CancellationToken ct) =>
         SendAsync(new DriverCommand
         {
             Type = "message",
             PlayerId = playerId,
             Payload = new MessagePayload { VibrateMs = milliseconds },
+        }, ct);
+
+    public Task ShowTextAsync(string? playerId, string text, CancellationToken ct) =>
+        SendAsync(new DriverCommand
+        {
+            Type = "message",
+            PlayerId = playerId,
+            Payload = new MessagePayload { Text = text },
         }, ct);
 
     public async Task SendAsync(DriverCommand command, CancellationToken ct)
@@ -271,7 +292,7 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
         {
             await socket.SendAsync(json, WebSocketMessageType.Text, endOfMessage: true, ct);
         }
-        catch (WebSocketException)
+        catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException)
         {
             // The receive loop owns reconnection; the caller retries once it is back.
         }
@@ -279,12 +300,6 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
         {
             _sendLock.Release();
         }
-    }
-
-    private Uri SocketUri()
-    {
-        var scheme = baseUri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws";
-        return new Uri(scheme + "://" + baseUri.Authority + wsPath);
     }
 
     private static string DescribeCloseCode(int code) => code switch
@@ -295,6 +310,7 @@ public sealed class SessionConnection(Uri baseUri, string wsPath) : ISessionConn
         4005 => "The session was ended.",
         4008 => "The service is rate limiting this connection.",
         4010 => "Another app connected as the driver for this session.",
+        4011 => "This connection was removed from the session.",
         _ => "The connection closed.",
     };
 

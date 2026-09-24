@@ -5,7 +5,8 @@ public sealed record MappedSchema(Schema Schema, Mapping Mapping);
 
 /// <summary>
 /// The bundled preset library (SCHEMA-1). Presets are read-only; the editor will make a
-/// copy rather than change one in place.
+/// copy rather than change one in place. The real-gamepad entry is the odd one out: its
+/// controls are fixed by the phone, only its mapping is ours.
 /// </summary>
 public static class Presets
 {
@@ -21,6 +22,7 @@ public static class Presets
         Platformer(),
         Fighting(),
         Party(),
+        PhysicalGamepad.Mapped,
     ];
 
     public static MappedSchema Default => All[0];

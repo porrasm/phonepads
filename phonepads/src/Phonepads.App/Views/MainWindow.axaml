@@ -70,7 +70,7 @@
 
                     <TextBlock Text="Phonepads" Classes="h1" />
                     <TextBlock Classes="dim" TextWrapping="Wrap" Margin="0,4,0,14"
-                               Text="Turn phones into Xbox controllers or Wii Remotes. Create a session on the website, then paste its setup code here." />
+                               Text="Turn phones — or controllers paired with phones — into Xbox controllers or Wii Remotes. Create a session on the website and paste its setup code here, or use a driver key and skip the website." />
 
                     <Border Classes="card">
                         <StackPanel>
@@ -105,13 +105,17 @@
                                 <TextBlock Grid.Column="4" Text="Max" VerticalAlignment="Center" Margin="12,0,6,0" />
                                 <NumericUpDown Grid.Column="5" Value="{Binding MaxPlayers}" Minimum="1" Maximum="12" Width="90" />
                             </Grid>
-                            <CheckBox Content="Forward game rumble to phones (Xbox controllers only)" IsChecked="{Binding RumbleEnabled}" Margin="0,10,0,0" />
+                            <CheckBox Content="Forward game rumble to phones (Xbox controllers only; a real gamepad rumbles itself)" IsChecked="{Binding RumbleEnabled}" Margin="0,10,0,0" />
+                            <CheckBox Content="Let players join while the game is running" IsChecked="{Binding AllowLateJoin}" Margin="0,4,0,0" />
+                            <TextBlock Classes="dim" FontSize="12" TextWrapping="Wrap" Margin="24,0,0,0"
+                                       Text="A late joiner gets a pad straight away — only for games that cope with a controller appearing mid-match." />
                         </StackPanel>
                     </Border>
 
                     <Border Classes="card">
                         <StackPanel>
-                            <TextBlock Text="3. Paste the setup code" Classes="h2" Margin="0,0,0,6" />
+                            <TextBlock Text="3. Get a session" Classes="h2" Margin="0,0,0,6" />
+                            <TextBlock Text="Paste the setup code from the website" Classes="dim" Margin="0,0,0,4" />
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <TextBox Text="{Binding SetupCode}" Watermark="ABC234" Width="160"
                                          FontSize="18" FontFamily="Consolas,monospace" MaxLength="6" />
@@ -122,6 +126,20 @@
                                 <Button Content="Create one on the website"
                                         Command="{Binding OpenCreatePageCommand}" />
                             </StackPanel>
+
+                            <TextBlock Text="…or use a driver key and skip the website" Classes="dim" Margin="0,14,0,4" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBox Text="{Binding DriverKey}" Watermark="gpk_…" Width="320"
+                                         PasswordChar="•" FontFamily="Consolas,monospace" />
+                                <Button Content="Start with key"
+                                        Command="{Binding CreateWithKeyCommand}"
+                                        IsEnabled="{Binding !IsBusy}" />
+                                <CheckBox Content="Replace my existing session" IsChecked="{Binding ReplaceExistingSession}"
+                                          VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Classes="dim" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="Make one on the website's front page under Driver keys (log in, name it, copy it — it is shown once). It is kept in the settings file beside the app, so treat that folder like a password. Revoke it on the website if it leaks." />
+
                             <TextBlock Text="{Binding ErrorMessage}" Foreground="#E05555" TextWrapping="Wrap"
                                        Margin="0,10,0,0" IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
                         </StackPanel>
@@ -173,7 +191,7 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:PlayerRowViewModel">
                                         <Border BorderBrush="#22888888" BorderThickness="0,0,0,1" Padding="0,8">
-                                            <Grid ColumnDefinitions="Auto,160,70,110,*">
+                                            <Grid ColumnDefinitions="Auto,160,70,110,*,Auto">
                                                 <Border Grid.Column="0" Width="14" Height="14" CornerRadius="7"
                                                         Background="{Binding Swatch}" VerticalAlignment="Center"
                                                         Margin="0,0,10,0" />
@@ -189,13 +207,17 @@
                                                     <TextBlock Text="{Binding MotionState}" Classes="dim"
                                                                FontFamily="Consolas,monospace" FontSize="11" />
                                                 </StackPanel>
+                                                <Button Grid.Column="5" Content="Kick" FontSize="11" Padding="8,2"
+                                                        VerticalAlignment="Center" Margin="8,0,0,0"
+                                                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).KickCommand}"
+                                                        CommandParameter="{Binding Id}" />
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <TextBlock Classes="dim" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
-                                       Text="Four pads at most. Xbox pads and Wii Remotes can mix; each player gets whichever their layout drives." />
+                                       Text="Four pads at most. Xbox pads and Wii Remotes can mix; each player gets whichever their layout drives. A real gamepad paired with a phone arrives as an Xbox pad. Kick removes a player without banning them." />
                         </StackPanel>
                     </Border>
 
@@ -204,6 +226,7 @@
                                 IsEnabled="{Binding CanStart}" Classes="accent" />
                         <Button Content="Pause" Command="{Binding PauseCommand}" IsEnabled="{Binding CanPause}" />
                         <Button Content="Resume" Command="{Binding ResumeCommand}" IsEnabled="{Binding CanResume}" />
+                        <Button Content="Back to lobby" Command="{Binding ReturnToLobbyCommand}" IsEnabled="{Binding CanReturnToLobby}" />
                         <Button Content="End session" Command="{Binding EndCommand}" />
                     </StackPanel>
                 </StackPanel>
